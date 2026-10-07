@@ -20,4 +20,11 @@ Not in git on purpose: `.env`, `venv/`, `crawled_data/`, `crawled_data_raw/`, `v
 
 Site cleaning: a site is cleaned only if it has an enabled profile in `crawler/site_profiles.json`. Safety gates fall back to
 the raw pages, and raw crawls are archived in `crawled_data_raw/`. Block pages (CAPTCHA / Access Denied) are never imported.
-Extra tools and docs: https://github.com/Samarjitkashyp/axomai-browser/tree/main/server/axomai-bot-tools
+## Tools (`tools/`)
+- `run_crawl.py` - run one crawl from the command line with the bot's engine (no dashboard login); does not import into Axom AI
+- `site_dryrun.py` - dry-run a candidate site profile on saved crawls (changes nothing)
+- `refetch_blocked.py` - slowly re-fetch pages that were saved as block pages
+- `blogger_feed.py` - full post text of a Blogger blog from its feed (when the pages are rate-limited)
+- `clean_report.py` - cleaning report
+
+How the cleaner and profiles work: [docs/CLEANING.md](docs/CLEANING.md).

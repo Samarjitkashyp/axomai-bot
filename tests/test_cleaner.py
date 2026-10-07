@@ -96,6 +96,19 @@ def test_same_line_twice_on_one_page_is_kept_once():
     assert text.count("short") == 2       # lines under 4 words are not touched
 
 
+def test_block_pages_are_dropped_but_real_short_pages_stay():
+    pages = site()
+    google = "Our systems have detected unusual traffic from your computer network. This page checks to see if it's really you sending the requests, and not a robot."
+    pages.append({"url": "https://x.in/blocked-1", "title": "https://x.in/blocked-1", "content": "\n\n".join(["https://x.in/blocked-1", "About this page", google]), "word_count": 0, "change_status": "new"})
+    pages.append({"url": "https://x.in/blocked-2", "title": "Access Denied", "content": "Access Denied\n\nYou don't have permission to access this server.", "word_count": 0, "change_status": "new"})
+    pages.append({"url": "https://x.in/real-short", "title": "Notice", "content": "Notice\n\nOffice closed on Monday for the festival. Please contact the reception for urgent matters.", "word_count": 0, "change_status": "new"})
+    out, summary = cleaner.clean_pages(pages, PROF)
+    urls = [x["url"] for x in out]
+    assert "https://x.in/blocked-1" not in urls and "https://x.in/blocked-2" not in urls
+    assert "https://x.in/real-short" in urls
+    assert sum(1 for v in summary["pages_dropped"].values() if v.startswith("block page")) == 2
+
+
 def test_unknown_site_is_untouched(tmp_path=None):
     assert cleaner.apply_profile("https://no-profile.example/", site()) is None
 
