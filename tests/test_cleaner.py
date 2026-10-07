@@ -61,7 +61,7 @@ def test_a_line_on_one_page_is_never_removed():
 
 
 def test_few_pages_no_boilerplate_removal():
-    out, _ = cleaner.clean_pages(site(5), PROF)
+    out, _ = cleaner.clean_pages(site(5), dict(PROF, drop_ui_lines=False))   # with the button list off, only the statistics would remove the menu
     assert "Enquire Now" in out[0]["content"]
 
 
@@ -109,8 +109,38 @@ def test_block_pages_are_dropped_but_real_short_pages_stay():
     assert sum(1 for v in summary["pages_dropped"].values() if v.startswith("block page")) == 2
 
 
-def test_unknown_site_is_untouched(tmp_path=None):
-    assert cleaner.apply_profile("https://no-profile.example/", site()) is None
+def test_site_without_profile_gets_the_automatic_cleaning():
+    pages = site() + [page("https://x.in/post?share=twitter", "Tour 1", ["junk"]), page("https://x.in/tag/elephants", "Tag", ["junk"])]
+    for p in pages[:3]:
+        p["content"] += "\n\nread more\n\nShare on Facebook\n\nPost a Comment\n\nMore than 50 tourists visited Kaziranga last week"
+    res = cleaner.apply_profile("https://no-profile.example/", pages)
+    assert res is not None
+    out, summary = res
+    assert summary["applied"] and summary["mode"] == "auto"
+    urls = [x["url"] for x in out]
+    assert "https://x.in/post?share=twitter" not in urls and "https://x.in/tag/elephants" not in urls
+    text = out[0]["content"]
+    assert "read more" not in text and "Share on Facebook" not in text and "Post a Comment" not in text
+    assert "More than 50 tourists visited Kaziranga last week" in text      # a sentence that starts with a button word stays
+    assert "Unique plan for tour 0 at Kaziranga" in text
+
+
+def test_site_can_be_switched_off():
+    old = cleaner.PROFILE_FILE
+    with tempfile.TemporaryDirectory() as d:
+        cleaner.PROFILE_FILE = os.path.join(d, "p.json")
+        json.dump({"off.example": {"enabled": False}}, open(cleaner.PROFILE_FILE, "w"))
+        try:
+            assert cleaner.apply_profile("https://off.example/", site()) is None
+        finally:
+            cleaner.PROFILE_FILE = old
+
+
+def test_ui_line_detection_is_whole_line_only():
+    for l in ("More", "view more", "Share on WhatsApp (Opens in new window)", "Comments 0", "ADVERTISEMENT", "© 2021 All Rights Reserved", "https://x.in/a"):
+        assert cleaner.is_ui_line(l), l
+    for l in ("More than 50 tourists visited", "Share your story with us at the office", "Price Rs. 5000 per person"):
+        assert not cleaner.is_ui_line(l), l
 
 
 def test_storage_hook_archives_raw_and_cleans():
@@ -127,11 +157,12 @@ def test_storage_hook_archives_raw_and_cleans():
             assert cleaned["stats"]["cleaning"]["applied"] is True
             assert "Enquire Now" in raw["pages"][0]["content"] and "Enquire Now" not in cleaned["pages"][0]["content"]
             assert raw["total_pages_crawled"] == len(site())
-            # a site without a profile: saved as before, no raw archive, no cleaning entry
+            # a site without a profile: automatic cleaning, raw archive kept
             path2 = sm.save_crawl_job("job_t2", "https://other.example/", "completed", site(), {"started_at": "now"})
             other = json.load(open(path2, encoding="utf-8"))
-            assert "cleaning" not in other["stats"] and "Enquire Now" in other["pages"][0]["content"]
-            assert not os.path.exists(os.path.join(d, "crawled_data_raw", os.path.basename(path2)))
+            assert other["stats"]["cleaning"]["mode"] == "auto"
+            assert "Enquire Now" not in other["pages"][0]["content"] and "Unique plan for tour 0" in other["pages"][0]["content"]
+            assert os.path.exists(os.path.join(d, "crawled_data_raw", os.path.basename(path2)))
         finally:
             cleaner.PROFILE_FILE = old
 
