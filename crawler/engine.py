@@ -167,6 +167,50 @@ class CrawlerEngine:
                 await browser.close()
             return None
 
+    async def _api_source_pages(self, client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+        """AXOMAI-API: clean article text from the site's own API (WordPress) instead of crawling its pages. [] = crawl normally.
+        Off with AXOMAI_API_SOURCES=0 or "use_api": false in the site's profile."""
+        import os
+        if os.getenv("AXOMAI_API_SOURCES", "1") == "0":
+            return []
+        try:
+            from crawler.cleaner import load_profiles
+            from urllib.parse import urlparse as _up
+            host = _up(self.job.seed_url).netloc.lower().replace("www.", "")
+            prof = load_profiles().get(host)
+            if isinstance(prof, dict) and prof.get("use_api") is False:
+                return []
+            from crawler.sources import wordpress_pages
+            pages = await wordpress_pages(client, self.job.seed_url, self.job.max_pages, self.job.log)
+            if pages:
+                self.job.log("Using the WordPress API for %s: %d pages with clean article text (no links followed)" % (host, len(pages)))
+            return pages
+        except Exception as e:
+            self.job.log("API source skipped: %s" % e)
+            return []
+
+    def _ingest_api_pages(self, pages: List[Dict[str, Any]]):
+        for parsed_page in pages:
+            url = parsed_page["url"]
+            content_hash = URLCatalog.compute_hash(parsed_page["content"])
+            parsed_page["content_hash"] = content_hash
+            change_status = self.catalog.check_change_status(url, content_hash)
+            if not self.job.force_recrawl and change_status == "unchanged":
+                self.job.pages_skipped += 1
+                parsed_page["change_status"] = "skipped_unchanged"
+            else:
+                if change_status == "updated":
+                    self.job.pages_updated += 1
+                    parsed_page["change_status"] = "updated"
+                else:
+                    self.job.pages_new += 1
+                    parsed_page["change_status"] = "new"
+                self.catalog.record_url(url=url, content_hash=content_hash, domain=self.frontier.clean_domain,
+                                        title=parsed_page["title"], job_id=self.job.job_id)
+            self.job.pages.append(parsed_page)
+        self.frontier.pages_crawled = len(self.job.pages)
+        self.job.pages_crawled = self.frontier.pages_crawled
+
     async def run(self):
         """
         Main crawling loop running as an asynchronous background task.
@@ -194,7 +238,10 @@ class CrawlerEngine:
 
         try:
             async with httpx.AsyncClient(headers=headers, verify=False) as client:
-                while self.frontier.has_more():
+                api_pages = await self._api_source_pages(client)
+                if api_pages:
+                    self._ingest_api_pages(api_pages)
+                while not api_pages and self.frontier.has_more():
                     if self.job.is_cancelled:
                         self.job.log(f"🛑 [Crawl Stopped]: Stopped by user request. Saving {self.job.pages_crawled} crawled pages.")
                         break
