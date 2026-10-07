@@ -78,8 +78,60 @@ class ContentExtractor:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         return "\n\n".join(lines)
 
+    NEXT_DATA_RE = re.compile(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+    NEXT_SKIP_KEYS = {"url", "href", "src", "slug", "id", "uid", "uuid", "image", "img", "icon", "className", "class", "locale", "locales", "buildId",
+                      "path", "pathname", "query", "alt", "type", "key", "ref", "canonical", "sitemap", "favicon"}
+    NEXT_MIN_THIN_WORDS = 60     # below this many words the normal extraction is "thin" and __NEXT_DATA__ may help
+
+    @classmethod
+    def extract_next_data(cls, html: str) -> str:
+        """Text of a Next.js (pages router) page that is rendered in the browser: the readable strings of props.pageProps in
+        __NEXT_DATA__. "" when there is no such data. Meant only as a fallback for pages whose HTML has (almost) no text."""
+        import json
+        m = cls.NEXT_DATA_RE.search(html or "")
+        if not m:
+            return ""
+        try:
+            data = json.loads(m.group(1))
+            root = (data.get("props") or {}).get("pageProps")
+        except Exception:
+            return ""
+        out: List[str] = []
+        seen = set()
+
+        def walk(node, key=""):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k not in cls.NEXT_SKIP_KEYS:
+                        walk(v, k)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v, key)
+            elif isinstance(node, str):
+                t = BeautifulSoup(node, "lxml").get_text("\n").strip() if "<" in node else node.strip()
+                for line in (x.strip() for x in t.split("\n")):
+                    letters = sum(ch.isalpha() for ch in line)
+                    if len(line) >= 25 and letters >= 0.5 * len(line) and not re.match(r"^(https?://|/)", line) and line not in seen:
+                        seen.add(line)
+                        out.append(line)
+
+        if root is not None:
+            walk(root)
+        return "\n\n".join(out)
+
     @classmethod
     def extract_content(cls, html: str, url: str) -> str:
+        """Main content of a page: the HTML text, or - when that is almost empty and the page is a client-rendered Next.js page -
+        the text in its __NEXT_DATA__."""
+        text = cls._extract_html_content(html, url)
+        if len(re.findall(r"\w+", text, re.UNICODE)) < cls.NEXT_MIN_THIN_WORDS:
+            alt = cls.extract_next_data(html)
+            if len(re.findall(r"\w+", alt, re.UNICODE)) >= 40 and len(alt) > 1.5 * len(text):
+                return alt
+        return text
+
+    @classmethod
+    def _extract_html_content(cls, html: str, url: str) -> str:
         """
         Extracts clean main content. Prioritizes primary article containers,
         complements with Trafilatura, and falls back to clean BS4 extraction.
