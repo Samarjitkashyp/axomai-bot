@@ -203,4 +203,9 @@ async def scheduler_loop(
             await check_and_run(storage_manager, active_jobs)
         except Exception as e:
             logger.error("Scheduler tick error: %s", e)
+        try:  # backup clean-up, switched on/off in the Axom AI admin panel (Settings > Bot backup clean-up); off by default
+            from app import cleanup
+            await asyncio.to_thread(cleanup.maybe_run)
+        except Exception as e:
+            logger.error("Backup clean-up error: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)
