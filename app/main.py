@@ -1,12 +1,14 @@
 import os
 import io
 import csv
+import json
 import uuid
 import asyncio
 import logging
 import httpx
 from typing import Dict, List, Any
 from urllib.parse import urlparse
+from html import escape as html_escape
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, RedirectResponse, JSONResponse
@@ -34,6 +36,7 @@ from app.models import (
     RAGChatResponse
 )
 from crawler.engine import CrawlerJob, CrawlerEngine
+from app.export import export_pages
 from crawler.storage import StorageManager
 from rag.vector_store import VectorStoreManager
 from rag.llm_client import LLMManager
@@ -357,7 +360,7 @@ async def stop_crawl_job(job_id: str):
 @app.get("/api/crawl/export/{job_id}/csv")
 async def export_crawl_csv(job_id: str):
     """
-    Generates and streams an Excel-compatible CSV file containing ONLY the URL and clean Content.
+    Generates and streams an Excel-compatible CSV file with two columns: the page name and its clean content (no URL, links or buttons).
     Encoded with UTF-8 BOM (utf-8-sig) so Assamese, Hindi, and English text render natively in Excel.
     """
     data = storage_manager.get_crawl_job(job_id)
@@ -374,14 +377,11 @@ async def export_crawl_csv(job_id: str):
     pages = data.get("pages", [])
     output = io.StringIO()
     writer = csv.writer(output)
-    # Strictly only 2 columns: URL and Content
-    writer.writerow(["URL", "Content"])
+    # Strictly only 2 columns: Page (name) and Content
+    writer.writerow(["Page", "Content"])
 
-    for p in pages:
-        writer.writerow([
-            p.get("url", ""),
-            p.get("content", "")
-        ])
+    for item in export_pages(pages):
+        writer.writerow([item["page"], item["content"]])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")
     safe_domain = urlparse(data.get("seed_url", "crawl")).netloc.replace("www.", "") or "export"
@@ -394,10 +394,29 @@ async def export_crawl_csv(job_id: str):
     )
 
 
+@app.get("/api/crawl/export/{job_id}/json")
+async def export_crawl_json(job_id: str):
+    """
+    Content-only JSON: a list of {"page": name, "content": text}. The full dataset (links, stats) is still at /api/crawl/download/{job_id}.
+    """
+    data = storage_manager.get_crawl_job(job_id)
+    if not data and job_id in active_jobs:
+        data = {"seed_url": active_jobs[job_id].seed_url, "pages": active_jobs[job_id].pages}
+    if not data:
+        raise HTTPException(status_code=404, detail="Crawl data not found.")
+    safe_domain = urlparse(data.get("seed_url", "crawl")).netloc.replace("www.", "") or "export"
+    body = json.dumps(export_pages(data.get("pages", [])), ensure_ascii=False, indent=2).encode("utf-8")
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{job_id}_{safe_domain}_content.json"'}
+    )
+
+
 @app.get("/api/crawl/export/{job_id}/pdf")
 async def export_crawl_pdf(job_id: str):
     """
-    Generates and streams a clean, printable PDF document containing ONLY Link and Clean Content.
+    Generates and streams a clean, printable PDF: for every page its name as a heading and its clean content (no URL, links or buttons).
     Uses Playwright Chromium for 100% native Unicode font rendering of Assamese, Hindi, and English.
     """
     data = storage_manager.get_crawl_job(job_id)
@@ -414,19 +433,15 @@ async def export_crawl_pdf(job_id: str):
     pages = data.get("pages", [])
     seed_url = data.get("seed_url", "Website")
     safe_domain = urlparse(seed_url).netloc.replace("www.", "") or "export"
-    total_pages = len(pages)
 
     # Build clean HTML template for printing
     html_items = []
-    for idx, p in enumerate(pages, start=1):
-        url = p.get("url", "")
-        content = p.get("content", "").replace("<", "&lt;").replace(">", "&gt;")
+    for item in export_pages(pages):
+        name = html_escape(item["page"])
+        content = html_escape(item["content"])
         html_items.append(f"""
         <div class="page-card">
-            <div class="page-meta">
-                <span class="page-num">#{idx}</span>
-                <a href="{url}" class="page-url" target="_blank">{url}</a>
-            </div>
+            <h2 class="page-name">{name}</h2>
             <div class="page-content">{content}</div>
         </div>
         """)
@@ -448,47 +463,15 @@ async def export_crawl_pdf(job_id: str):
             margin: 0;
             padding: 0;
         }}
-        .header {{
-            border-bottom: 2px solid #3b82f6;
-            padding-bottom: 12px;
-            margin-bottom: 24px;
-        }}
-        .header h1 {{
-            margin: 0 0 6px 0;
-            font-size: 20px;
-            color: #0f172a;
-        }}
-        .header .meta {{
-            font-size: 12px;
-            color: #64748b;
-        }}
         .page-card {{
-            margin-bottom: 24px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid #e2e8f0;
-            page-break-inside: avoid;
+            margin-bottom: 28px;
         }}
-        .page-meta {{
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-            margin-bottom: 8px;
-        }}
-        .page-num {{
-            background: #eff6ff;
-            color: #2563eb;
+        .page-name {{
+            font-size: 17px;
             font-weight: 700;
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 4px;
-            border: 1px solid #bfdbfe;
-        }}
-        .page-url {{
-            font-size: 13px;
-            font-weight: 600;
-            color: #2563eb;
-            text-decoration: none;
-            word-break: break-all;
+            color: #0f172a;
+            margin: 0 0 8px 0;
+            break-after: avoid;
         }}
         .page-content {{
             font-size: 13px;
@@ -500,12 +483,6 @@ async def export_crawl_pdf(job_id: str):
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Axom AI — Extracted Web Content</h1>
-        <div class="meta">
-            Target: <strong>{seed_url}</strong> | Total Pages: <strong>{total_pages}</strong>
-        </div>
-    </div>
     {"".join(html_items)}
 </body>
 </html>"""

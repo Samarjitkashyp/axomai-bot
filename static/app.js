@@ -292,9 +292,9 @@ async function loadJobs() {
                         <div class="table-actions">
                             <button class="btn btn-emerald btn-xs" onclick="indexDataset('${job.job_id}')" title="Chunk and store into Vector DB">⚡ Index</button>
                             <button class="btn btn-secondary btn-xs" onclick="inspectDataset('${job.job_id}')">👁 View</button>
-                            <a href="/api/crawl/download/${job.job_id}" class="btn btn-primary btn-xs" target="_blank" title="Download JSON dataset">⬇ JSON</a>
-                            <a href="/api/crawl/export/${job.job_id}/csv" class="btn-csv" target="_blank" title="Download Excel CSV (Link + Content)">📊 CSV</a>
-                            <a href="/api/crawl/export/${job.job_id}/pdf" class="btn-pdf" target="_blank" title="Download Printable PDF (Link + Content)">📑 PDF</a>
+                            <a href="/api/crawl/export/${job.job_id}/json" class="btn btn-primary btn-xs" target="_blank" title="Download JSON (page name + content only)">⬇ JSON</a>
+                            <a href="/api/crawl/export/${job.job_id}/csv" class="btn-csv" target="_blank" title="Download Excel CSV (page name + content only)">📊 CSV</a>
+                            <a href="/api/crawl/export/${job.job_id}/pdf" class="btn-pdf" target="_blank" title="Download PDF (page name + content only)">📑 PDF</a>
                             <button class="btn-delete" onclick="deleteDataset('${job.job_id}')" title="Delete Dataset & Vectors">🗑️</button>
                         </div>
                     </td>
@@ -326,7 +326,7 @@ async function inspectDataset(jobId) {
 
     title.textContent = `Dataset Inspector: ${jobId}`;
     content.textContent = 'Loading dataset...';
-    downloadBtn.href = `/api/crawl/download/${jobId}`;
+    downloadBtn.href = `/api/crawl/export/${jobId}/json`;
     if (downloadCsvBtn) {
         downloadCsvBtn.href = `/api/crawl/export/${jobId}/csv`;
     }
