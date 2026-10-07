@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Axom AI — Web Crawler & Generative RAG</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="brand-icon">⚡</div>
+                <div class="brand-text">
+                    <h1>Axom AI <span>Crawler & Chat</span></h1>
+                    <p class="subtitle">Multilingual Web Harvester & Generative RAG Assistant</p>
+                </div>
+            </div>
+            <div class="nav-actions">
+                <a href="/docs" target="_blank" class="nav-btn btn-ghost">
+                    <span class="icon">📖</span> API Docs
+                </a>
+                <span class="status-indicator live">
+                    <span class="pulse-dot"></span> Engine Online
+                </span>
+                <a href="/logout" class="nav-btn btn-ghost" style="color:#f87171">
+                    <span class="icon">🚪</span> Logout
+                </a>
+            </div>
+        </header>
+
+        <!-- Metrics Overview -->
+        <section class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-icon purple">🌐</div>
+                <div class="metric-content">
+                    <span class="metric-label">Total Jobs</span>
+                    <h3 id="statTotalJobs">0</h3>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon cyan">📄</div>
+                <div class="metric-content">
+                    <span class="metric-label">Pages Crawled</span>
+                    <h3 id="statTotalPages">0</h3>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon amber">⚡</div>
+                <div class="metric-content">
+                    <span class="metric-label">Active Crawlers</span>
+                    <h3 id="statActiveJobs">0</h3>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon emerald">🧠</div>
+                <div class="metric-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span class="metric-label">Indexed Vectors</span>
+                        <button id="resetVectorBtn" class="btn-xs btn-outline-danger" title="Reset all vector embeddings">Clear</button>
+                    </div>
+                    <h3 id="statIndexedVectors">0</h3>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Workspace (Crawler) -->
+        <div class="workspace-grid">
+            <!-- Left: Launch Control -->
+            <section class="card launch-card">
+                <div class="card-header">
+                    <h2>🚀 New Crawl Job</h2>
+                    <span class="badge">Single Domain Locked</span>
+                </div>
+                
+                <form id="crawlForm" class="crawl-form">
+                    <div class="form-group">
+                        <label for="seedUrl">Target Seed URL</label>
+                        <div class="input-with-icon">
+                            <span class="input-icon">🔗</span>
+                            <input 
+                                type="url" 
+                                id="seedUrl" 
+                                placeholder="https://example.gov.in" 
+                                required
+                            >
+                        </div>
+                        <small class="helper-text">Bot will automatically lock and crawl internal links within this domain.</small>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="maxPages">Max Pages</label>
+                            <input type="number" id="maxPages" value="25" min="1" max="5000" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="maxDepth">Max Depth</label>
+                            <input type="number" id="maxDepth" value="3" min="1" max="20" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="crawlDelay">Delay (Seconds)</label>
+                            <input type="number" id="crawlDelay" value="1.0" min="0.0" max="5.0" step="0.5" required>
+                        </div>
+                    </div>
+
+                    <div class="form-toggle-row">
+                        <div class="toggle-info">
+                            <strong>Render JavaScript (Headless Chromium)</strong>
+                            <p>Enable for dynamic Single Page Apps (React / Next.js / Vue).</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="renderJs">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <div class="form-toggle-row" style="margin-top: -10px;">
+                        <div class="toggle-info">
+                            <strong>Force Re-crawl (Bypass Smart Skip)</strong>
+                            <p>Re-scrape all pages even if content has not changed.</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="forceRecrawl">
+                            <span class="slider round"></span>
+                        </label>
+</div>
+
+                    <div class="form-toggle-row" style="margin-top: -10px;">
+                        <div class="toggle-info">
+                            <strong>Include Subdomains</strong>
+                            <p>Also crawl sibling subdomains (e.g. assam.news18.com will also crawl hindi.news18.com).</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="includeSubdomains">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <button type="submit" id="startBtn" class="btn btn-primary">
+                        <span class="btn-text">Start Web Crawler</span>
+                        <span class="btn-spinner hidden"></span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Right: Real-time Monitor -->
+            <section class="card monitor-card">
+                <div class="card-header">
+                    <h2>📡 Live Progress Monitor</h2>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button id="stopCrawlBtn" class="btn btn-danger-sm hidden" title="Stop crawl immediately">🛑 Stop Crawl</button>
+                        <span id="liveStatusBadge" class="badge badge-idle">Idle</span>
+                    </div>
+                </div>
+
+                <div class="monitor-content">
+                    <div class="progress-section">
+                        <div class="progress-labels">
+                            <span id="progressText">0 / 0 pages</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="progressBar" class="progress-bar-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="change-counters-row">
+                            <span class="counter-chip chip-new"><strong id="counterNew">0</strong> New</span>
+                            <span class="counter-chip chip-updated"><strong id="counterUpdated">0</strong> Updated</span>
+                            <span class="counter-chip chip-skipped"><strong id="counterSkipped">0</strong> Skipped</span>
+                        </div>
+                    </div>
+
+                    <div class="current-url-box">
+                        <span class="label">Current Visiting URL:</span>
+                        <div id="currentUrlDisplay" class="url-text">None active</div>
+                    </div>
+
+                    <!-- Live Log Terminal -->
+                    <div class="terminal-container">
+                        <div class="terminal-header">
+                            <span>Crawler Output Logs</span>
+                            <button id="clearLogsBtn" class="btn-xs">Clear</button>
+                        </div>
+                        <div id="logTerminal" class="terminal-body">
+                            <p class="log-placeholder">Ready to crawl. Enter a URL and click Start.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- GENERATIVE AI RAG CHAT CONSOLE -->
+        <section class="card chat-card">
+            <div class="card-header">
+                <div>
+                    <h2>💬 Chat with Axom AI (Generative RAG)</h2>
+                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                        Answers strictly generated from your crawled web knowledge with source links.
+                    </p>
+                </div>
+                <div class="chat-controls">
+                    <select id="llmProviderSelect" class="select-sm">
+                        <option value="auto">Provider: Auto-Detect</option>
+                        <option value="gemini">Google Gemini API</option>
+                        <option value="ollama">Local Ollama</option>
+                        <option value="fallback">Local Synthesizer</option>
+                    </select>
+                    <button id="apiKeyToggleBtn" class="btn-xs" title="Configure optional API keys">⚙️ Key</button>
+                </div>
+            </div>
+
+            <!-- Optional API Key Drawer -->
+            <div id="apiKeyDrawer" class="api-key-drawer hidden">
+                <div class="api-key-row">
+                    <label for="geminiApiKeyInput">Google Gemini API Key (Optional):</label>
+                    <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy... (leave blank for local synthesizer)">
+                    <button id="saveApiKeyBtn" class="btn-secondary btn-xs">Save</button>
+                </div>
+            </div>
+
+            <!-- Chat Stream Window -->
+            <div class="chat-container">
+                <div id="chatMessages" class="chat-messages">
+                    <div class="chat-message bot">
+                        <div class="msg-avatar">⚡</div>
+                        <div class="msg-content">
+                            <p>নমস্কাৰ! Hello! I am <strong>Axom AI</strong>. You can ask me questions about any indexed websites in <strong>English, অসমীয়া (Assamese), or हिंदी (Hindi)</strong>. Index a dataset below to get started!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Input Form -->
+                <form id="chatForm" class="chat-input-form">
+                    <input 
+                        type="text" 
+                        id="chatInput" 
+                        placeholder="Ask a question about crawled websites (e.g. 'What is this domain used for?')..." 
+                        required
+                        autocomplete="off"
+                    >
+                    <button type="submit" id="chatSendBtn" class="btn btn-primary" style="width: auto; padding: 0 20px;">
+                        <span>Send</span>
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Bottom: Crawled Datasets Table -->
+        <section class="card history-card" style="margin-top: 24px;">
+            <div class="card-header">
+                <h2>📁 Crawled Datasets & Vector Indexing</h2>
+                <button id="refreshJobsBtn" class="btn-secondary btn-sm">
+                    🔄 Refresh List
+                </button>
+            </div>
+
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Target Domain / Seed</th>
+                            <th>Status</th>
+                            <th>Pages</th>
+                            <th>Completed At</th>
+                            <th>File Size</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobsTableBody">
+                        <tr>
+                            <td colspan="7" class="empty-state">Loading dataset archives...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Auto-Sync Schedule -->
+        <section class="card schedule-card" style="margin-top: 24px;">
+            <div class="card-header">
+                <h2>🔄 Auto-Sync Schedule (Every 10 Days)</h2>
+                <button id="refreshScheduleBtn" class="btn-secondary btn-sm">🔄 Refresh</button>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); padding: 0 20px;">
+                Crawled sites are automatically re-scanned every 10 days. Smart Skip ensures only new content is fetched — zero server load on unchanged pages.
+            </p>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Target Site</th>
+                            <th>Last Crawled</th>
+                            <th>Next Auto-Scan</th>
+                            <th>Days Left</th>
+                            <th>Auto Runs</th>
+                            <th>Last Status</th>
+                            <th>Auto-Sync</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scheduleTableBody">
+                        <tr>
+                            <td colspan="7" class="empty-state">No scheduled sites yet. Crawl a site to auto-register it.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- JSON Preview Modal -->
+    <div id="previewModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">Dataset Preview</h3>
+                <button id="closeModalBtn" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre><code id="modalJsonContent">Loading...</code></pre>
+            </div>
+            <div class="modal-footer">
+                <a id="modalDownloadBtn" href="#" class="btn btn-primary btn-sm">Download JSON</a>
+                <a id="modalDownloadCsvBtn" href="#" class="btn btn-secondary btn-sm">📊 Export CSV</a>
+                <a id="modalDownloadPdfBtn" href="#" class="btn btn-secondary btn-sm" target="_blank">📑 Export PDF</a>
+                <button id="modalDismissBtn" class="btn btn-secondary btn-sm">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

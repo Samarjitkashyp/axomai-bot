@@ -1,0 +1,134 @@
+{
+  "_help": "A site is cleaned only if it has a profile here with enabled=true. Other sites are saved exactly as crawled. junk_urls: regexes of pages to drop. keep_pages: regexes of listing/hub pages that are never cleaned. terms: phrases that must still be in the text after cleaning (if one would be lost, nothing is cleaned). threshold: a line is site-wide if it is on this share of the pages. top_lines: how many lines at the top of a page are protected (default 6; 0 for news sites). allow_subdomains: false switches the crawl form's Include Subdomains off for this site, even if it is ticked (works with enabled=false too).",
+  "myvoyage.co.in": {
+    "enabled": true,
+    "threshold": 0.3,
+    "junk_urls": [
+      "/new-demo/",
+      "[?&]e-page-",
+      "[?&](page|paged|p)=\\d+",
+      "/tag/",
+      "/page/\\d+",
+      "[?&](replytocom|share|print)="
+    ],
+    "keep_pages": [
+      "/all-tours$",
+      "/tour-category/",
+      "/special-interest-tours",
+      "/inclusions-and-exclusions",
+      "^https://myvoyage\\.co\\.in/?$"
+    ],
+    "terms": [
+      "Kaziranga",
+      "Tawang",
+      "Shillong",
+      "Cherrapunji",
+      "Dawki",
+      "Majuli",
+      "Sivasagar",
+      "Ziro",
+      "Hornbill",
+      "Dirang",
+      "Bomdila",
+      "Guwahati",
+      "Kamakhya",
+      "Living Root Bridge",
+      "Honeymoon",
+      "Birding"
+    ]
+  },
+  "assam.news18.com": {
+    "enabled": true,
+    "allow_subdomains": false,
+    "threshold": 0.3,
+    "top_lines": 0,
+    "junk_urls": [
+      "^https?://(?!assam\\.news18\\.com)",
+      "/tag/",
+      "[?&](page|paged|p)=\\d+",
+      "/page/\\d+"
+    ],
+    "keep_pages": [
+      "^https://assam\\.news18\\.com/?$",
+      "/photogallery/news$"
+    ],
+    "terms": [
+      "অসম",
+      "গুৱাহাটী"
+    ]
+  },
+  "asomiyapratidin.in": {
+    "enabled": true,
+    "allow_subdomains": false,
+    "threshold": 0.3,
+    "top_lines": 0,
+    "junk_urls": [
+      "[?&](page|paged|p)=\\d+",
+      "/tags/",
+      "/page/\\d+"
+    ],
+    "keep_pages": [
+      "^https://www\\.asomiyapratidin\\.in/?$"
+    ],
+    "terms": [
+      "অসম",
+      "গুৱাহাটী"
+    ]
+  },
+  "xukhdukh.com": {
+    "enabled": true,
+    "allow_subdomains": false,
+    "threshold": 0.3,
+    "top_lines": 0,
+    "junk_urls": [
+      "/search",
+      "[?&](max-results|updated-max|by-date|page|paged|p)=",
+      "/page/\\d+"
+    ],
+    "keep_pages": [
+      "^https://www\\.xukhdukh\\.com/?$"
+    ],
+    "terms": [
+      "অসম",
+      "গুৱাহাটী"
+    ]
+  },
+  "dainikagradoot.in": {
+    "enabled": true,
+    "allow_subdomains": false,
+    "threshold": 0.3,
+    "top_lines": 0,
+    "junk_urls": [
+      "[?&](share|nb|page|paged|p|replytocom|print)=",
+      "/blog/tag/",
+      "/page/\\d+"
+    ],
+    "keep_pages": [
+      "^https://dainikagradoot\\.in/?$",
+      "/blog/category/[^/]+/?$"
+    ],
+    "terms": [
+      "অসম",
+      "গুৱাহাটী"
+    ]
+  },
+  "assamtribune.com": {
+    "enabled": true,
+    "allow_subdomains": false,
+    "threshold": 0.3,
+    "top_lines": 0,
+    "junk_urls": [
+      "/user/",
+      "[?&](page|paged|p|planId|redirectUrl)=",
+      "/page/\\d+",
+      "/full-page-pdf/"
+    ],
+    "keep_pages": [
+      "^https://assamtribune\\.com/?$"
+    ],
+    "terms": [
+      "Assam",
+      "Guwahati"
+    ]
+  }
+}

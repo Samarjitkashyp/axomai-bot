@@ -1,0 +1,10 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.log
+*.bak*
+crawled_data/
+crawled_data_raw/
+vector_store/
+reports/
