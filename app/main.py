@@ -163,7 +163,18 @@ async def _push_to_chat(job_id: str, seed_url: str):
         return
     # AXOMAI-BATCH: batches of 200 pages with retries (a single huge request could time out and lose the whole crawl)
     from app.chat_import import push_pages
-    await push_pages(CHAT_IMPORT_URL, BOT_IMPORT_TOKEN, seed_url, job_id, pages)
+
+    async def _push(batch):
+        return await push_pages(CHAT_IMPORT_URL, BOT_IMPORT_TOKEN, seed_url, job_id, batch)
+
+    # AXOMAI-QA: passages + one AI-written question each (any site); falls back to whole pages when anything is not available
+    from app.qa_chunks import qa_enabled, push_with_passages
+    if qa_enabled(seed_url):
+        from app.auth import get_db_conn
+        outcome = await push_with_passages(_push, seed_url, job_id, pages, get_db_conn)
+        _import_logger.info("Chat import %s: %s", seed_url, {k: v for k, v in outcome.items() if k != "totals"})
+        return
+    await _push(pages)
 
 
 # --- Crawler Endpoints ---
