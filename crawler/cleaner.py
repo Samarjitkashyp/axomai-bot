@@ -83,6 +83,7 @@ DEFAULT_PROFILE = {
         r"[?&](share|replytocom|print|fbclid|gclid|utm_[a-z]+|nb)=", r"[?&](page|paged|p)=\d+", r"/page/\d+/?$", r"[?&](s|q|query|search)=",
         r"/feed/?$", r"/wp-json/", r"/wp-admin", r"/wp-login", r"/cart/?$", r"/checkout", r"/my-account", r"/(login|signin|sign-in|register|signup)/?$",
         r"/tags?/", r"\.(jpg|jpeg|png|gif|svg|webp|zip|mp4|mp3)(\?|$)",
+        r"/\d{4}/\d{2}(/\d{2})?/?$",   # WordPress year/month/day archives: a list of posts, not a page (a post url has its slug after the date)
     ],
     "keep_pages": [r"^https?://[^/]+/?$"],
     "terms": [],

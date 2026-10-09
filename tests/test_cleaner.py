@@ -125,6 +125,15 @@ def test_site_without_profile_gets_the_automatic_cleaning():
     assert "Unique plan for tour 0 at Kaziranga" in text
 
 
+def test_wordpress_date_archives_are_dropped_but_posts_with_a_date_in_the_url_stay():
+    pages = site() + [page("https://no-profile.example/2026/02/26", "Home copy", ["junk"]), page("https://no-profile.example/2026/02", "Month", ["junk"]),
+                      page("https://no-profile.example/2026/02/26/my-post", "My post", ["A real post about elephants in Kaziranga national park"])]
+    out, _ = cleaner.apply_profile("https://no-profile.example/", pages)
+    urls = [x["url"] for x in out]
+    assert "https://no-profile.example/2026/02/26" not in urls and "https://no-profile.example/2026/02" not in urls
+    assert "https://no-profile.example/2026/02/26/my-post" in urls
+
+
 def test_site_can_be_switched_off():
     old = cleaner.PROFILE_FILE
     with tempfile.TemporaryDirectory() as d:
