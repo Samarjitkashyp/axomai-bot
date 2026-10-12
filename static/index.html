@@ -192,45 +192,59 @@
                 </div>
             </section>
         </div>
-        <!-- Upload & Scan Documents: images / PDFs -> text -> admin approval -> Axom AI chat -->
+        <!-- Upload & Scan Documents: images / PDFs -> text -> admin approval (Admin Panel > Document Verify) -> Axom AI chat -->
         <section class="card doc-card" style="margin-top: 24px;">
-            <div class="card-header">
-                <div>
-                    <h2>📄 Upload &amp; Scan Documents</h2>
-                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
-                        Photos and PDFs in any language are read, cleaned and kept here for your approval. Only approved text goes to Axom AI chat.
-                    </p>
+            <div class="doc-head">
+                <div class="doc-title">
+                    <span class="doc-title-icon" aria-hidden="true">📄</span>
+                    <div>
+                        <h2>Upload &amp; Scan Documents</h2>
+                        <p>Teach Axom AI from photos and PDFs, in any language.</p>
+                    </div>
                 </div>
-                <button id="docRefreshBtn" class="btn-secondary btn-sm">🔄 Refresh</button>
+                <div class="doc-meter" title="Pages read by Gemini / OpenAI today">
+                    <div class="doc-meter-top"><span id="docUsage">0 / 500</span><span>AI pages today</span></div>
+                    <div class="doc-meter-bar"><div id="docMeterFill" style="width:0%"></div></div>
+                </div>
             </div>
 
+            <ol class="doc-steps">
+                <li><b>1</b><span>Upload or scan</span></li>
+                <li><b>2</b><span>AI reads the text</span></li>
+                <li><b>3</b><span>Admin approves</span></li>
+                <li><b>4</b><span>Axom AI learns</span></li>
+            </ol>
+
             <div id="docDrop" class="doc-drop">
-                <p><strong>Drop files here</strong> or choose them (images: PNG, JPG, WEBP · PDF · up to 20 MB each)</p>
+                <div class="doc-drop-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+                </div>
+                <p class="doc-drop-title"><span class="doc-drop-desktop">Drag &amp; drop files here</span><span class="doc-drop-mobile">Add a document</span></p>
+                <p class="doc-drop-hint">PNG · JPG · WEBP · PDF &nbsp;|&nbsp; up to 20 MB each &nbsp;|&nbsp; Assamese, Hindi, English and more</p>
                 <div class="doc-buttons">
-                    <label class="btn btn-primary doc-pick" style="width:auto;padding:0 18px">
-                        ⬆️ Upload file
+                    <label class="doc-btn doc-btn-main">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+                        Choose file
                         <input id="docUploadInput" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" multiple hidden>
                     </label>
-                    <label class="btn btn-primary doc-pick doc-scan-only" style="width:auto;padding:0 18px">
-                        📷 Scan with camera
+                    <label class="doc-btn doc-btn-scan doc-scan-only">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        Scan with camera
                         <input id="scanInput" type="file" accept="image/*" capture="environment" hidden>
                     </label>
                 </div>
                 <div id="scanTray" class="scan-tray"></div>
-                <button id="scanSendBtn" class="btn btn-primary hidden" style="width:auto;padding:0 18px">Send pages</button>
-                <p id="docMessage" class="doc-sub" style="margin-top:8px"></p>
+                <button id="scanSendBtn" class="doc-btn doc-btn-main hidden" type="button">Send pages</button>
+                <p id="docMessage" class="doc-message" role="status"></p>
             </div>
 
-            <p id="docWarn" class="doc-sub hidden" style="color:#f59e0b;margin:8px 0"></p>
-            <p id="docUsage" class="doc-sub" style="margin:6px 0"></p>
+            <p id="docWarn" class="doc-warn hidden"></p>
 
-            <div class="table-container">
-                <table class="data-table">
-                    <thead><tr><th>Document</th><th>Pages</th><th>Read by</th><th>Status</th><th></th></tr></thead>
-                    <tbody id="docRows"><tr><td colspan="5" class="doc-sub">Loading…</td></tr></tbody>
-                </table>
+            <div class="doc-list-head">
+                <h3>Your uploads</h3>
+                <button id="docRefreshBtn" class="doc-link" type="button">↻ Refresh</button>
             </div>
-            <div id="docReview" class="doc-review hidden"></div>
+            <div id="docRows" class="doc-list"><p class="doc-empty">Loading…</p></div>
         </section>
 
         <!-- Bottom: Crawled Datasets Table -->
