@@ -1,7 +1,9 @@
 // Upload & Scan Documents: files (or phone-camera scans) -> text -> approved by the admin (Axom AI admin panel > Document Verify) -> Axom AI chat.
 // This panel only uploads and shows where each document is; approving is done in the admin panel.
 (function () {
-    const MAX_BYTES = 20 * 1024 * 1024;
+    const MAX_IMAGE = 20 * 1024 * 1024;
+    const MAX_PDF = 150 * 1024 * 1024;
+    const BIG = 4 * 1024 * 1024;     // a single file over this is sent in pieces
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     let scans = [];          // pictures taken with the camera, not sent yet: [{blob, url}]
@@ -33,15 +35,45 @@
     // ---------------------------------------------------------------- sending
     async function send(files) {
         if (!files.length) return;
+        const isPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
         for (const f of files) {
-            if (f.size > MAX_BYTES) { say(f.name + ' is bigger than 20 MB.', true); return; }
+            if (isPdf(f) && f.size > MAX_PDF) { say(f.name + ' is bigger than 150 MB.', true); return; }
+            if (!isPdf(f) && f.size > MAX_IMAGE) { say(f.name + ' is bigger than 20 MB (pictures can be 20 MB at most; PDFs up to 150 MB).', true); return; }
         }
+        if (files.length === 1 && files[0].size > BIG) { return sendBig(files[0]); }
         if (files.reduce((n, f) => n + f.size, 0) > 30 * 1024 * 1024) { say('Together these files are too big (30 MB at a time). Send them in smaller groups.', true); return; }
         const fd = new FormData();
         files.forEach((f) => fd.append('files', f, f.name));
         say('Uploading…');
         try {
             await api('/api/upload', { method: 'POST', body: fd });
+            say('Uploaded. The text is being read; an admin will check it before Axom AI learns from it.');
+            await refresh();
+        } catch (e) {
+            say(e.message, true);
+        }
+    }
+
+    // A big file goes in 8 MB pieces: Cloudflare refuses one request over 100 MB, and a dropped connection costs one piece, not the whole file.
+    async function sendBig(file) {
+        const MB = 1024 * 1024;
+        try {
+            const begin = await api('/api/upload/begin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: file.name, size: file.size }) });
+            for (let i = 0; i < begin.total; i++) {
+                const piece = file.slice(i * begin.chunk_size, (i + 1) * begin.chunk_size);
+                let sent = false, lastErr = null;
+                for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+                    try {
+                        await api('/api/upload/chunk/' + begin.sid + '/' + i, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: piece });
+                        sent = true;
+                    } catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); }
+                }
+                if (!sent) throw lastErr || new Error('Upload failed.');
+                const doneMB = Math.round(Math.min(file.size, (i + 1) * begin.chunk_size) / MB);
+                say('Uploading ' + file.name + ': ' + Math.round((i + 1) * 100 / begin.total) + '% (' + doneMB + ' of ' + Math.round(file.size / MB) + ' MB)');
+            }
+            say('Finishing…');
+            await api('/api/upload/finish/' + begin.sid, { method: 'POST' });
             say('Uploaded. The text is being read; an admin will check it before Axom AI learns from it.');
             await refresh();
         } catch (e) {

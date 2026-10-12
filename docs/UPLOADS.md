@@ -3,7 +3,7 @@
 Photos and PDFs (any language) -> text -> **admin approval** -> Axom AI chat. Section "Upload & Scan Documents" on the bot dashboard, above "Crawled Datasets".
 
 * **Who:** anyone who can log in to the bot panel. Nothing is public.
-* **Files:** PNG / JPG / WEBP or one PDF (20 MB each, up to 200 PDF pages); a phone scan = several pictures = one document. The real file type is checked, not the name.
+* **Files:** PNG / JPG / WEBP or one PDF (a picture up to 20 MB, a PDF up to 150 MB and 600 pages; big files are sent in 8 MB pieces because Cloudflare refuses one request over 100 MB); a phone scan = several pictures = one document. The real file type is checked, not the name.
 * **Reading order for a picture:** Gemini vision -> OpenAI vision (when Gemini has no key / quota) -> Tesseract (asm+hin+eng, always flagged "review"). A PDF page that already has text is read with `pdftotext` (exact, free).
 * **Daily limit:** 500 pages a day go to Gemini/OpenAI (admin setting `bot_upload_daily_pages` in SystemSetting; default 500). After that pages are read by Tesseract only and flagged.
 * **Review:** the admin sees the page picture next to its text, corrects it, then approves. Only then is the document saved like a crawl (`doc-<id>`, shown in "Crawled Datasets") and sent to the chat with the same passages + questions step as a crawled site. Chat sources for uploads point to `https://documents.aiaxom.co.in/<id>#pN` (not a real page).
