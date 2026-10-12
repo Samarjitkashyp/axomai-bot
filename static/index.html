@@ -192,6 +192,47 @@
                 </div>
             </section>
         </div>
+        <!-- Upload & Scan Documents: images / PDFs -> text -> admin approval -> Axom AI chat -->
+        <section class="card doc-card" style="margin-top: 24px;">
+            <div class="card-header">
+                <div>
+                    <h2>📄 Upload &amp; Scan Documents</h2>
+                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                        Photos and PDFs in any language are read, cleaned and kept here for your approval. Only approved text goes to Axom AI chat.
+                    </p>
+                </div>
+                <button id="docRefreshBtn" class="btn-secondary btn-sm">🔄 Refresh</button>
+            </div>
+
+            <div id="docDrop" class="doc-drop">
+                <p><strong>Drop files here</strong> or choose them (images: PNG, JPG, WEBP · PDF · up to 20 MB each)</p>
+                <div class="doc-buttons">
+                    <label class="btn btn-primary doc-pick" style="width:auto;padding:0 18px">
+                        ⬆️ Upload file
+                        <input id="docUploadInput" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" multiple hidden>
+                    </label>
+                    <label class="btn btn-primary doc-pick doc-scan-only" style="width:auto;padding:0 18px">
+                        📷 Scan with camera
+                        <input id="scanInput" type="file" accept="image/*" capture="environment" hidden>
+                    </label>
+                </div>
+                <div id="scanTray" class="scan-tray"></div>
+                <button id="scanSendBtn" class="btn btn-primary hidden" style="width:auto;padding:0 18px">Send pages</button>
+                <p id="docMessage" class="doc-sub" style="margin-top:8px"></p>
+            </div>
+
+            <p id="docWarn" class="doc-sub hidden" style="color:#f59e0b;margin:8px 0"></p>
+            <p id="docUsage" class="doc-sub" style="margin:6px 0"></p>
+
+            <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Document</th><th>Pages</th><th>Read by</th><th>Status</th><th></th></tr></thead>
+                    <tbody id="docRows"><tr><td colspan="5" class="doc-sub">Loading…</td></tr></tbody>
+                </table>
+            </div>
+            <div id="docReview" class="doc-review hidden"></div>
+        </section>
+
         <!-- Bottom: Crawled Datasets Table -->
         <section class="card history-card" style="margin-top: 24px;">
             <div class="card-header">
@@ -276,5 +317,6 @@
     </div>
 
     <script src="/static/app.js"></script>
+    <script src="/static/uploads.js"></script>
 </body>
 </html>

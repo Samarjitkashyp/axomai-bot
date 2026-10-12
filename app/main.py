@@ -6,6 +6,7 @@ import uuid
 import asyncio
 import logging
 import httpx
+from datetime import datetime
 from typing import Dict, List, Any
 from urllib.parse import urlparse
 from html import escape as html_escape
@@ -558,6 +559,142 @@ async def delete_crawl_job(job_id: str):
             "deleted_vectors": deleted_vectors
         }
     raise HTTPException(status_code=404, detail="Dataset file not found.")
+
+# --- Document uploads (images / PDFs -> text -> admin approval -> Axom AI chat) ---
+
+from fastapi import UploadFile, File
+from app import uploads as upl
+from app import doc_ocr
+
+_upload_tasks: set = set()
+
+
+def _spawn_read(uid: str):
+    task = asyncio.create_task(upl.process_upload(uid))
+    _upload_tasks.add(task)
+    task.add_done_callback(_upload_tasks.discard)
+
+
+@app.on_event("startup")
+async def resume_uploads():
+    for uid in upl.resume_unfinished():
+        _spawn_read(uid)
+
+
+def _upload_or_404(uid: str) -> Dict[str, Any]:
+    try:
+        meta = upl.read_meta(uid)
+    except ValueError:
+        meta = None
+    if not meta:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    return meta
+
+
+@app.post("/api/upload")
+async def upload_documents(request: Request, files: List[UploadFile] = File(...)):
+    """One PDF, or one or more pictures (a phone scan is several pictures = several pages of one document)."""
+    blobs = []
+    for f in files:
+        data = await f.read(doc_ocr.MAX_BYTES + 1)
+        blobs.append((f.filename or "scan", data))
+    try:
+        meta = upl.create_upload(blobs, getattr(request.state, "user", {}).get("username", ""))
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _spawn_read(meta["id"])
+    return {"id": meta["id"], "status": meta["status"], "name": meta["name"]}
+
+
+@app.get("/api/upload/list")
+async def list_uploads():
+    return {"uploads": upl.list_uploads(), "pages_used_today": upl.pages_used_today(), "daily_limit": upl.daily_limit(),
+            "ocr": {"tesseract": doc_ocr.tesseract_available(), "poppler": doc_ocr.poppler_available(),
+                    "gemini": bool(doc_ocr._env_key("GEMINI_API_KEY")), "openai": bool(doc_ocr._env_key("OPENAI_API_KEY"))}}
+
+
+@app.get("/api/upload/{uid}")
+async def get_upload(uid: str):
+    meta = _upload_or_404(uid)
+    return {k: v for k, v in meta.items() if k != "files"}
+
+
+@app.get("/api/upload/{uid}/image/{name}")
+async def upload_image(uid: str, name: str):
+    meta = _upload_or_404(uid)
+    if not any(p.get("image") == name for p in meta["pages"]):
+        raise HTTPException(status_code=404, detail="No such picture.")
+    path = os.path.join(upl.doc_dir(uid), name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="No such picture.")
+    return FileResponse(path)
+
+
+@app.put("/api/upload/{uid}/page/{n}")
+async def edit_upload_page(uid: str, n: int, request: Request):
+    body = await request.json()
+    text = body.get("text")
+    if not isinstance(text, str) or len(text) > 200000:
+        raise HTTPException(status_code=400, detail="Text is missing or too long.")
+    try:
+        meta = upl.edit_page(uid, n, text)
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    page = next(p for p in meta["pages"] if p["n"] == n)
+    return {"ok": True, "page": page}
+
+
+async def _approve_and_send(uid: str):
+    meta = upl.read_meta(uid)
+    pages = upl.build_pages(meta)
+    job_id = "doc-" + uid
+    seed = upl.seed_url(meta)
+    now_iso = datetime.now().isoformat()
+    storage_manager.save_crawl_job(job_id, seed, "completed", pages,
+                                   {"started_at": meta["created_at"], "completed_at": now_iso, "source": "upload",
+                                    "file_name": meta["name"], "engines": sorted({p.get("engine") for p in meta["pages"]})})
+    await _push_to_chat(job_id, seed)
+
+
+@app.post("/api/upload/{uid}/approve")
+async def approve_upload(uid: str, request: Request, background_tasks: BackgroundTasks):
+    meta = _upload_or_404(uid)
+    if meta["status"] != "review":
+        raise HTTPException(status_code=400, detail="This upload is not waiting for review.")
+    if not upl.build_pages(meta):
+        raise HTTPException(status_code=400, detail="There is no text to send.")
+    user = getattr(request.state, "user", {}).get("username", "")
+    upl.mark(uid, "approved", user, job_id="doc-" + uid)
+    background_tasks.add_task(_approve_and_send, uid)
+    return {"ok": True, "job_id": "doc-" + uid}
+
+
+@app.post("/api/upload/{uid}/resend")
+async def resend_upload(uid: str, background_tasks: BackgroundTasks):
+    meta = _upload_or_404(uid)
+    if meta["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Only approved uploads can be sent again.")
+    background_tasks.add_task(_approve_and_send, uid)
+    return {"ok": True}
+
+
+@app.post("/api/upload/{uid}/reject")
+async def reject_upload(uid: str, request: Request):
+    _upload_or_404(uid)
+    try:
+        upl.mark(uid, "rejected", getattr(request.state, "user", {}).get("username", ""))
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.delete("/api/upload/{uid}")
+async def delete_upload(uid: str):
+    meta = _upload_or_404(uid)
+    if meta["status"] == "processing":
+        raise HTTPException(status_code=400, detail="It is still being read.")
+    upl.delete_upload(uid)
+    return {"ok": True}
 
 
 @app.post("/api/rag/reset")
