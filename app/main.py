@@ -166,7 +166,16 @@ async def serve_dashboard():
     index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # the CSS / JS links carry the file's change time, so a browser or Cloudflare never keeps showing an old design after a deploy
+        def _versioned(m):
+            try:
+                return '%s?v=%d"' % (m.group(1), int(os.path.getmtime(os.path.join(STATIC_DIR, m.group(2)))))
+            except OSError:
+                return m.group(0)
+        import re as _re
+        html = _re.sub(r'(/static/([\w.-]+\.(?:css|js)))"', _versioned, html)
+        return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
     return HTMLResponse("<h1>Axom AI Crawler & RAG API is running! Visit /docs for Swagger UI.</h1>")
 
 
