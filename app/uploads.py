@@ -303,22 +303,56 @@ async def process_upload(uid: str, base: Optional[str] = None, client: Optional[
                     raise UploadError("This PDF has no pages.")
                 if total > doc_ocr.MAX_PDF_PAGES:
                     raise UploadError("This PDF has %d pages; the limit is %d." % (total, doc_ocr.MAX_PDF_PAGES))
+                force = bool(meta.get("force_vision"))
+                pixels = await asyncio.to_thread(doc_ocr.pdf_image_pixels, path)
+                counts = {"text_layer": 0, "garbled_layer": 0, "pictures": 0, "blank": 0}
                 for n in range(1, total + 1):
                     layer = doc_ocr.clean_text(await asyncio.to_thread(doc_ocr.pdf_text_layer, path, n))
-                    if len(layer) >= doc_ocr.TEXT_LAYER_MIN_CHARS:
+                    quality = doc_ocr.layer_quality(layer)
+                    heavy = pixels.get(n, 0) >= doc_ocr.IMAGE_HEAVY_PX
+                    if quality == "good" and not heavy and not force:
+                        counts["text_layer"] += 1
                         pages.append({"n": n, "text": layer, "engine": "pdf-text", "review": False, "reason": "", "image": ""})
                     else:
+                        # the text layer is missing, unreadable (old Assamese / Hindi fonts), or the page carries pictures that may hold text:
+                        # the page is drawn and read as a picture, and a good text layer only serves as a cross-check
                         img = await asyncio.to_thread(doc_ocr.pdf_render, path, n, os.path.join(d, "p%d" % n))
-                        r = await read_picture(img, "jpeg")
-                        pages.append({"n": n, "text": r["text"], "engine": r["engine"], "review": r["review"], "reason": r["reason"], "image": os.path.basename(img)})
+                        if quality == "empty" and pixels.get(n, 0) == 0 and not force:
+                            # nothing to read on paper, nothing in pictures: Tesseract looks first, so that a blank page costs no AI page
+                            try:
+                                seen = await asyncio.to_thread(doc_ocr.tesseract_read, img)
+                            except doc_ocr.EngineUnavailable:
+                                seen = ""
+                            if len(seen.split()) < doc_ocr.BLANK_TESS_WORDS:
+                                os.remove(img)
+                                counts["blank"] += 1
+                                pages.append({"n": n, "text": layer, "engine": "pdf-text", "review": False, "reason": "", "image": ""})
+                                meta["pages"], meta["page_count"] = pages, total
+                                write_meta(meta, base)
+                                continue
+                        paid = pages_used_today(base) < limit
+                        if paid:
+                            count_paid_page(base)
+                        r = await doc_ocr.read_image(img, "jpeg", client, paid_ok=paid, cross=layer if quality == "good" else None)
+                        counts["garbled_layer" if quality == "garbled" else "pictures"] += 1
+                        page = {"n": n, "text": r["text"], "engine": r["engine"], "review": r["review"], "reason": r["reason"], "image": os.path.basename(img)}
+                        if quality == "garbled":
+                            page["note"] = "the PDF's own text was unreadable (old font): read from the picture of the page"
+                        pages.append(page)
                     meta["pages"], meta["page_count"] = pages, total
                     write_meta(meta, base)
+                meta["read_summary"] = counts
             else:
                 for n, f in enumerate(meta["files"], 1):
                     r = await read_picture(os.path.join(d, f["file"]), f["kind"])
                     pages.append({"n": n, "text": r["text"], "engine": r["engine"], "review": r["review"], "reason": r["reason"], "image": f["file"]})
                     meta["pages"], meta["page_count"] = pages, len(meta["files"])
                     write_meta(meta, base)
+            texts, removed = doc_ocr.strip_repeated_lines([p["text"] for p in pages])
+            if removed:
+                for p, t in zip(pages, texts):
+                    p["text"] = t
+                meta["removed_repeated_lines"] = removed
             meta["status"] = "review" if any(p["text"].strip() for p in pages) else "failed"
             if meta["status"] == "failed":
                 meta["error"] = "No text could be read from this file."
@@ -332,6 +366,19 @@ async def process_upload(uid: str, base: Optional[str] = None, client: Optional[
                 await client.aclose()
         write_meta(meta, base)
         return meta
+
+
+def reread_upload(uid: str, user: str, base: Optional[str] = None) -> Dict[str, Any]:
+    """Reads the whole document again, every page as a picture (for a PDF whose own text layer turned out to be wrong).
+    The admin's edits are lost; the daily AI-page limit applies."""
+    meta = read_meta(uid, base)
+    if not meta or meta["status"] not in ("review", "failed"):
+        raise UploadError("Only a document that is waiting for review (or failed) can be read again.")
+    meta.update({"status": "processing", "error": "", "pages": [], "page_count": 0, "force_vision": True, "removed_repeated_lines": 0,
+                 "reread_by": user, "reread_at": now()})
+    meta.pop("read_summary", None)
+    write_meta(meta, base)
+    return meta
 
 
 def resume_unfinished(base: Optional[str] = None) -> List[str]:

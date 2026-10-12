@@ -752,6 +752,18 @@ async def resend_upload(uid: str, request: Request, background_tasks: Background
     return {"ok": True}
 
 
+@app.post("/api/upload/{uid}/reread")
+async def reread_upload(uid: str, request: Request):
+    _admin_only(request)
+    _upload_or_404(uid)
+    try:
+        meta = upl.reread_upload(uid, getattr(request.state, "user", {}).get("username", ""))
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _spawn_read(meta["id"])
+    return {"ok": True}
+
+
 @app.post("/api/upload/{uid}/reject")
 async def reject_upload(uid: str, request: Request):
     _admin_only(request)

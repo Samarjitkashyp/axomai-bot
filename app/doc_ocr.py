@@ -29,7 +29,10 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024       # a picture: the AI readers refuse bigg
 MAX_PDF_BYTES = 150 * 1024 * 1024        # a PDF (sent in 8 MB pieces, see uploads.begin_chunked)
 MAX_BYTES = MAX_IMAGE_BYTES
 MAX_PDF_PAGES = int(os.getenv("UPLOAD_MAX_PDF_PAGES", "600"))
-TEXT_LAYER_MIN_CHARS = 40       # a PDF page with fewer characters than this is treated as a picture
+TEXT_LAYER_MIN_CHARS = 40       # a PDF page with fewer characters than this has no usable text layer
+IMAGE_HEAVY_PX = 150_000        # a page whose pictures add up to more pixels than this may carry text inside its pictures
+WEIRD_MAX = 0.10                # more than this share of strange symbols in a text layer = legacy-font mojibake
+BLANK_TESS_WORDS = 5            # a page with no text layer and no pictures is read with Tesseract first; this many words = real text
 TESS_LANGS = os.getenv("TESSERACT_LANGS", "asm+hin+eng")
 GEMINI_VISION_MODELS = [m for m in os.getenv("GEMINI_VISION_MODELS", "gemini-3.5-flash,gemini-3.5-flash-lite").split(",") if m]
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
@@ -41,8 +44,9 @@ PROMPT = (
     "Transcribe ALL the text in this image exactly as written, in its original language and script "
     "(Assamese, Bengali, Hindi, English or any other). Do not translate, summarize, correct or explain. "
     "Keep the reading order and paragraphs; write a table as lines with ' | ' between the cells. "
-    "Skip page numbers, watermarks and decorative marks. If the image has no readable text, return an empty string. "
-    "Return only the text."
+    "Include text that is part of pictures, diagrams, labels and captions, but never describe the pictures themselves. "
+    "Skip page numbers, running headers and footers, watermarks (for example a diagonal copyright notice) and decorative marks. "
+    "If the image has no readable text, return an empty string. Return only the text."
 )
 
 
@@ -164,6 +168,7 @@ def tesseract_read(path: str) -> str:
 def clean_text(text: str) -> str:
     """Control characters out, spaces and blank lines tidied; the words themselves are not touched."""
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​﻿]", "", text or "")
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)     # the AI sometimes writes line breaks as <br>
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [re.sub(r"[ \t]+", " ", l).strip() for l in text.split("\n")]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
@@ -184,6 +189,8 @@ def agreement(a: str, b: str) -> float:
 def judge(text: str, engine: str, cross_check: Optional[str] = None) -> Tuple[bool, str]:
     """(review?, why) - a hint for the admin, never a reason to drop text."""
     if len(_words(text)) < MIN_WORDS:
+        if engine in ("gemini", "openai") and not text.strip():
+            return False, ""            # the AI looked at the page and found no text: a picture-only or blank page
         return True, "very little text"
     if engine == "tesseract":
         return True, "read by Tesseract only (weaker on Assamese)"
@@ -192,17 +199,89 @@ def judge(text: str, engine: str, cross_check: Optional[str] = None) -> Tuple[bo
     return False, ""
 
 
+# ---------------------------------------------------------------- is the text layer of a PDF page usable?
+_OK_PUNCT = {0xA0, 0xA9, 0xAE, 0xB0, 0xB7, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026, 0x20AC, 0x20B9, 0x2122}
+_OK_RANGES = ((0x0900, 0x0DFF),     # Devanagari, Bengali / Assamese, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala
+              (0x0400, 0x04FF), (0x0600, 0x06FF), (0x200B, 0x200F), (0x3040, 0x30FF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF))
+
+
+def _weird(ch: str) -> bool:
+    o = ord(ch)
+    if o < 0x80 or o in _OK_PUNCT:
+        return False
+    return not any(a <= o <= b for a, b in _OK_RANGES)
+
+
+def layer_quality(text: str) -> str:
+    """"good" | "garbled" | "empty" for the text layer of one PDF page.
+    Books made with old Assamese / Hindi fonts keep their text as Latin symbols (a page that looks Assamese copies out as
+    "ø¬ıÚ±˜”˘œ˚˛±"): such a page must be read as a picture. A page that holds only a rotated watermark ("C / op / no yr / t igh ...")
+    gives short broken fragments and is treated the same way."""
+    t = (text or "").strip()
+    if len(t) < TEXT_LAYER_MIN_CHARS:
+        return "empty"
+    chars = [c for c in t if not c.isspace()]
+    if chars and sum(1 for c in chars if _weird(c)) / len(chars) > WEIRD_MAX:
+        return "garbled"
+    lines = [l.strip() for l in t.split("\n") if l.strip()]
+    if len(lines) >= 8:
+        lens = sorted(len(l) for l in lines)
+        if lens[len(lens) // 2] <= 5:
+            return "garbled"
+    return "good"
+
+
+_PAGE_NO = re.compile(r"^[\W_]*(\d{1,4}|[ivxlcdm]{1,7})[\W_]*$", re.I)
+
+
+def strip_repeated_lines(texts: List[str], min_pages: int = 6) -> Tuple[List[str], int]:
+    """Running headers / footers and page numbers out of a long document: a short line that is on 40% of the pages (and at least 5)
+    is dropped everywhere, and a bare page number is dropped when it is the first or last line of its page. Returns (texts, lines removed)."""
+    if sum(1 for t in texts if t.strip()) < min_pages:
+        return texts, 0
+    norm = lambda l: re.sub(r"\s+", " ", l).strip().lower()
+    seen: Dict[str, int] = {}
+    for t in texts:
+        for l in {norm(x) for x in t.split("\n") if x.strip() and len(x.strip()) <= 120}:
+            seen[l] = seen.get(l, 0) + 1
+    need = max(5, int(0.4 * sum(1 for t in texts if t.strip())))
+    repeated = {l for l, n in seen.items() if n >= need}
+    out, removed = [], 0
+    for t in texts:
+        lines = t.split("\n")
+        keep = []
+        for l in lines:
+            if l.strip() and norm(l) in repeated:
+                removed += 1
+                continue
+            keep.append(l)
+        idx = [i for i, l in enumerate(keep) if l.strip()]
+        for i in ([idx[0], idx[-1]] if len(idx) > 1 else idx[:1]):
+            if _PAGE_NO.match(keep[i].strip()) and len(keep[i].strip()) <= 12:
+                keep[i] = ""
+                removed += 1
+        out.append(clean_text("\n".join(keep)))
+    return out, removed
+
+
 # ---------------------------------------------------------------- one picture
-async def read_image(path: str, kind: str, client: httpx.AsyncClient, paid_ok: bool = True) -> Dict[str, Any]:
-    """Text of one image file. paid_ok=False (daily limit reached) skips Gemini / OpenAI and uses Tesseract."""
+async def read_image(path: str, kind: str, client: httpx.AsyncClient, paid_ok: bool = True, cross: Optional[str] = None) -> Dict[str, Any]:
+    """Text of one image file. paid_ok=False (daily limit reached) skips Gemini / OpenAI and uses Tesseract.
+    `cross`: text of the same page from another source (a good PDF text layer); it replaces the Tesseract cross-check."""
     mime = MIME[kind]
     with open(path, "rb") as f:
         data = f.read()
-    tess = ""
-    try:
-        tess = await asyncio.to_thread(tesseract_read, path)
-    except EngineUnavailable:
-        pass
+    tess = None
+
+    async def get_tess() -> str:
+        nonlocal tess
+        if tess is None:
+            try:
+                tess = await asyncio.to_thread(tesseract_read, path)
+            except EngineUnavailable:
+                tess = ""
+        return tess
+
     text, engine, notes = "", "", []
     if paid_ok:
         for name, fn in (("gemini", gemini_read), ("openai", openai_read)):
@@ -213,11 +292,12 @@ async def read_image(path: str, kind: str, client: httpx.AsyncClient, paid_ok: b
             except EngineUnavailable as e:
                 notes.append(str(e))
     if not engine:
-        text, engine = tess, "tesseract"
-        if not tess:
+        text, engine = await get_tess(), "tesseract"
+        if not text:
             notes.append("tesseract: no text")
     text = clean_text(text)
-    review, why = judge(text, engine, tess if engine != "tesseract" else None)
+    other = None if engine == "tesseract" else (cross if cross is not None else await get_tess())
+    review, why = judge(text, engine, other)
     if not paid_ok:
         review, why = True, "daily page limit reached: read by Tesseract only"
     return {"text": text, "engine": engine, "review": review, "reason": why, "notes": notes}
@@ -239,6 +319,23 @@ def pdf_page_count(path: str) -> int:
 def pdf_text_layer(path: str, page: int) -> str:
     p = subprocess.run(["pdftotext", "-f", str(page), "-l", str(page), "-layout", "-enc", "UTF-8", path, "-"], capture_output=True, timeout=60)
     return p.stdout.decode("utf-8", "replace") if p.returncode == 0 else ""
+
+
+def pdf_image_pixels(path: str) -> Dict[int, int]:
+    """{page: total pixels of the pictures placed on it} for the whole PDF (one pdfimages call). Empty when pdfimages is missing."""
+    if shutil.which("pdfimages") is None:
+        return {}
+    try:
+        out = subprocess.run(["pdfimages", "-list", path], capture_output=True, text=True, timeout=120).stdout
+    except Exception:
+        return {}
+    pixels: Dict[int, int] = {}
+    for line in out.splitlines()[2:]:
+        cols = line.split()
+        # columns: page num type width height ...; a soft mask ("smask") only shapes another picture, it is not one
+        if len(cols) > 4 and cols[0].isdigit() and cols[2] != "smask" and cols[3].isdigit() and cols[4].isdigit():
+            pixels[int(cols[0])] = pixels.get(int(cols[0]), 0) + int(cols[3]) * int(cols[4])
+    return pixels
 
 
 def pdf_render(path: str, page: int, out_base: str, dpi: int = 150) -> str:
