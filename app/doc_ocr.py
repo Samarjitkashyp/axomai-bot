@@ -25,8 +25,10 @@ import httpx
 
 log = logging.getLogger("axomai.ocr")
 
-MAX_BYTES = 20 * 1024 * 1024
-MAX_PDF_PAGES = int(os.getenv("UPLOAD_MAX_PDF_PAGES", "200"))
+MAX_IMAGE_BYTES = 20 * 1024 * 1024       # a picture: the AI readers refuse bigger ones
+MAX_PDF_BYTES = 150 * 1024 * 1024        # a PDF (sent in 8 MB pieces, see uploads.begin_chunked)
+MAX_BYTES = MAX_IMAGE_BYTES
+MAX_PDF_PAGES = int(os.getenv("UPLOAD_MAX_PDF_PAGES", "600"))
 TEXT_LAYER_MIN_CHARS = 40       # a PDF page with fewer characters than this is treated as a picture
 TESS_LANGS = os.getenv("TESSERACT_LANGS", "asm+hin+eng")
 GEMINI_VISION_MODELS = [m for m in os.getenv("GEMINI_VISION_MODELS", "gemini-3.5-flash,gemini-3.5-flash-lite").split(",") if m]

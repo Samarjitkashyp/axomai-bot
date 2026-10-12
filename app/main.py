@@ -635,10 +635,40 @@ async def upload_documents(request: Request, files: List[UploadFile] = File(...)
     """One PDF, or one or more pictures (a phone scan is several pictures = several pages of one document)."""
     blobs = []
     for f in files:
-        data = await f.read(doc_ocr.MAX_BYTES + 1)
+        data = await f.read(doc_ocr.MAX_PDF_BYTES + 1)
         blobs.append((f.filename or "scan", data))
     try:
         meta = upl.create_upload(blobs, getattr(request.state, "user", {}).get("username", ""))
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _spawn_read(meta["id"])
+    return {"id": meta["id"], "status": meta["status"], "name": meta["name"]}
+
+
+@app.post("/api/upload/begin")
+async def upload_begin(request: Request):
+    """Big files (PDFs up to 150 MB) are sent in 8 MB pieces: begin -> /chunk/<sid>/<n> ... -> /finish/<sid>."""
+    body = await request.json()
+    try:
+        return upl.begin_chunked(str(body.get("name") or "file"), body.get("size"))
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/upload/chunk/{sid}/{index}")
+async def upload_chunk(sid: str, index: int, request: Request):
+    data = await request.body()
+    try:
+        stored = upl.save_chunk(sid, index, data)
+    except upl.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "stored": stored}
+
+
+@app.post("/api/upload/finish/{sid}")
+async def upload_finish(sid: str, request: Request):
+    try:
+        meta = await asyncio.to_thread(upl.finish_chunked, sid, getattr(request.state, "user", {}).get("username", ""))
     except upl.UploadError as e:
         raise HTTPException(status_code=400, detail=str(e))
     _spawn_read(meta["id"])

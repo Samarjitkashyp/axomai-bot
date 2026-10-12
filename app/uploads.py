@@ -120,6 +120,13 @@ class UploadError(Exception):
     """The upload is refused; the message is shown to the user."""
 
 
+def _check_size(name: str, kind: str, size: int) -> None:
+    if kind == "pdf" and size > doc_ocr.MAX_PDF_BYTES:
+        raise UploadError("%s is bigger than 150 MB." % (name or "The PDF"))
+    if kind != "pdf" and size > doc_ocr.MAX_IMAGE_BYTES:
+        raise UploadError("%s is bigger than 20 MB (the AI readers do not accept bigger pictures)." % (name or "The picture"))
+
+
 def create_upload(files: List[Tuple[str, bytes]], uploader: str, base: Optional[str] = None) -> Dict[str, Any]:
     """Checks the files (real type, size) and stores them. `files`: [(file name, bytes)]. Returns the new meta (status "processing")."""
     if not files:
@@ -130,11 +137,10 @@ def create_upload(files: List[Tuple[str, bytes]], uploader: str, base: Optional[
     for name, data in files:
         if not data:
             raise UploadError("%s is empty." % (name or "A file"))
-        if len(data) > doc_ocr.MAX_BYTES:
-            raise UploadError("%s is bigger than 20 MB." % (name or "A file"))
         kind = doc_ocr.detect_kind(data)
         if not kind:
             raise UploadError("%s is not an image (PNG, JPG, WEBP) or a PDF." % (name or "A file"))
+        _check_size(name, kind, len(data))
         kinds.append(kind)
     if "pdf" in kinds and len(files) > 1:
         raise UploadError("Upload one PDF at a time (or several pictures together).")
@@ -153,6 +159,120 @@ def create_upload(files: List[Tuple[str, bytes]], uploader: str, base: Optional[
             "uploader": uploader, "created_at": now(), "status": "processing", "error": "", "files": stored, "pages": [],
             "page_count": 0, "job_id": ""}
     write_meta(meta, base)
+    return meta
+
+
+def create_upload_from_file(path: str, name: str, uploader: str, base: Optional[str] = None) -> Dict[str, Any]:
+    """Like create_upload for one big file that is already on disk (a PDF sent in pieces): the file is moved, never loaded into memory."""
+    size = os.path.getsize(path)
+    if size <= 0:
+        raise UploadError("%s is empty." % (name or "The file"))
+    with open(path, "rb") as f:
+        kind = doc_ocr.detect_kind(f.read(16))
+    if not kind:
+        raise UploadError("%s is not an image (PNG, JPG, WEBP) or a PDF." % (name or "The file"))
+    _check_size(name, kind, size)
+    uid = uuid.uuid4().hex[:12]
+    d = doc_dir(uid, base)
+    os.makedirs(d, exist_ok=True)
+    fn = "orig1.%s" % ("pdf" if kind == "pdf" else doc_ocr.EXT[kind])
+    shutil.move(path, os.path.join(d, fn))
+    clean = re.sub(r"[^\w .()-]", "_", os.path.basename(name or fn))[:120]
+    meta = {"id": uid, "name": clean, "kind": "pdf" if kind == "pdf" else "images", "size": size, "uploader": uploader,
+            "created_at": now(), "status": "processing", "error": "", "files": [{"file": fn, "name": clean, "kind": kind}],
+            "pages": [], "page_count": 0, "job_id": ""}
+    write_meta(meta, base)
+    return meta
+
+
+# ---------------------------------------------------------------- big files: sent in pieces
+# A browser sends a big file as 8 MB pieces (one request each): Cloudflare refuses a single request over 100 MB, and a mobile
+# connection that drops loses one piece, not the whole file. begin -> chunk x N -> finish.
+CHUNK_BYTES = 8 * 1024 * 1024
+SID_RE = re.compile(r"^[a-f0-9]{16}$")
+TMP_NAME = "_tmp"
+TMP_MAX_AGE = 6 * 3600
+
+
+def _tmp_root(base: Optional[str]) -> str:
+    return os.path.join(base or UPLOAD_DIR, TMP_NAME)
+
+
+def _tmp_dir(sid: str, base: Optional[str]) -> str:
+    if not SID_RE.match(sid or ""):
+        raise UploadError("Unknown upload session.")
+    return os.path.join(_tmp_root(base), sid)
+
+
+def _purge_stale(base: Optional[str]) -> None:
+    root = _tmp_root(base)
+    if not os.path.isdir(root):
+        return
+    cutoff = datetime.now().timestamp() - TMP_MAX_AGE
+    for d in os.listdir(root):
+        p = os.path.join(root, d)
+        try:
+            if os.path.isdir(p) and os.path.getmtime(p) < cutoff:
+                shutil.rmtree(p)
+        except OSError:
+            pass
+
+
+def begin_chunked(name: str, size: int, base: Optional[str] = None) -> Dict[str, Any]:
+    if not isinstance(size, int) or size <= 0:
+        raise UploadError("The file is empty.")
+    if size > doc_ocr.MAX_PDF_BYTES:
+        raise UploadError("%s is bigger than 150 MB." % (name or "The file"))
+    _purge_stale(base)
+    sid = uuid.uuid4().hex[:16]
+    d = _tmp_dir(sid, base)
+    os.makedirs(d, exist_ok=True)
+    total = (size + CHUNK_BYTES - 1) // CHUNK_BYTES
+    with open(os.path.join(d, "info.json"), "w", encoding="utf-8") as f:
+        json.dump({"name": str(name or "file")[:200], "size": size, "total": total}, f)
+    return {"sid": sid, "chunk_size": CHUNK_BYTES, "total": total}
+
+
+def _tmp_info(sid: str, base: Optional[str]) -> Dict[str, Any]:
+    try:
+        with open(os.path.join(_tmp_dir(sid, base), "info.json"), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        raise UploadError("Unknown upload session.")
+
+
+def save_chunk(sid: str, index: int, data: bytes, base: Optional[str] = None) -> int:
+    """Stores piece number `index` (0-based); returns how many pieces are stored so far."""
+    info = _tmp_info(sid, base)
+    if not isinstance(index, int) or index < 0 or index >= info["total"]:
+        raise UploadError("Piece number out of range.")
+    if not data or len(data) > CHUNK_BYTES:
+        raise UploadError("A piece must be between 1 byte and 8 MB.")
+    d = _tmp_dir(sid, base)
+    tmp = os.path.join(d, "%d.part.tmp" % index)
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, os.path.join(d, "%d.part" % index))
+    return sum(1 for n in os.listdir(d) if n.endswith(".part"))
+
+
+def finish_chunked(sid: str, uploader: str, base: Optional[str] = None) -> Dict[str, Any]:
+    info = _tmp_info(sid, base)
+    d = _tmp_dir(sid, base)
+    missing = [i for i in range(info["total"]) if not os.path.isfile(os.path.join(d, "%d.part" % i))]
+    if missing:
+        raise UploadError("%d piece(s) are missing; please upload the file again." % len(missing))
+    full = os.path.join(d, "full")
+    with open(full, "wb") as out:
+        for i in range(info["total"]):
+            with open(os.path.join(d, "%d.part" % i), "rb") as part:
+                shutil.copyfileobj(part, out, 1024 * 1024)
+    try:
+        if os.path.getsize(full) != info["size"]:
+            raise UploadError("The file arrived incomplete; please upload it again.")
+        meta = create_upload_from_file(full, info["name"], uploader, base)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
     return meta
 
 

@@ -194,6 +194,62 @@ check("listing", len(up.list_uploads(base)) >= 6 and up.list_uploads(base)[0]["c
 check("delete", up.delete_upload(m5["id"], base) and up.read_meta(m5["id"], base) is None)
 check("delete missing", up.delete_upload("abcdef012345", base) is False)
 
+# ---- big files: limits and the sent-in-pieces path
+MB = 1024 * 1024
+check("limits: 150 MB pdf, 20 MB picture", doc_ocr.MAX_PDF_BYTES == 150 * MB and doc_ocr.MAX_IMAGE_BYTES == 20 * MB)
+
+
+def sparse(path, size, head):
+    with open(path, "wb") as f:
+        f.write(head)
+        f.truncate(size)
+
+
+big = os.path.join(base, "big.bin")
+sparse(big, 150 * MB + 1, PDF)
+check("a PDF over 150 MB is refused", raises(lambda: up.create_upload_from_file(big, "big.pdf", "u", base), up.UploadError) and os.path.exists(big))
+sparse(big, 150 * MB, PDF)
+mb = up.create_upload_from_file(big, "exactly150.pdf", "u", base)
+check("a 150 MB PDF is accepted and moved, not copied", mb["kind"] == "pdf" and not os.path.exists(big) and os.path.getsize(os.path.join(base, mb["id"], "orig1.pdf")) == 150 * MB)
+sparse(big, 21 * MB, PNG)
+check("a picture over 20 MB is refused", raises(lambda: up.create_upload_from_file(big, "photo.png", "u", base), up.UploadError))
+sparse(big, 5 * MB, b"MZ-not-a-document")
+check("a non-document big file is refused", raises(lambda: up.create_upload_from_file(big, "x.pdf", "u", base), up.UploadError))
+os.remove(big)
+check("multipart: a PDF over 150 MB is refused", raises(lambda: up.create_upload([("a.pdf", PDF + b"0" * (150 * MB))], "u", base), up.UploadError))
+
+check("begin: over 150 MB refused", raises(lambda: up.begin_chunked("a.pdf", 150 * MB + 1, base), up.UploadError))
+check("begin: empty refused", raises(lambda: up.begin_chunked("a.pdf", 0, base), up.UploadError))
+data = PDF + os.urandom(20 * MB - len(PDF))
+sess = up.begin_chunked("../big book.pdf", len(data), base)
+check("begin: 20 MB = 3 pieces of 8 MB", sess["total"] == 3 and sess["chunk_size"] == 8 * MB)
+piece = lambda i: data[i * 8 * MB:(i + 1) * 8 * MB]
+check("piece out of range", raises(lambda: up.save_chunk(sess["sid"], 3, b"x", base), up.UploadError))
+check("piece too big", raises(lambda: up.save_chunk(sess["sid"], 0, b"x" * (8 * MB + 1), base), up.UploadError))
+check("unknown session", raises(lambda: up.save_chunk("0123456789abcdef", 0, b"x", base), up.UploadError))
+check("bad session id", raises(lambda: up.save_chunk("../../etc", 0, b"x", base), up.UploadError))
+check("stored count", up.save_chunk(sess["sid"], 2, piece(2), base) == 1 and up.save_chunk(sess["sid"], 0, piece(0), base) == 2)
+check("finish with a missing piece", raises(lambda: up.finish_chunked(sess["sid"], "u", base), up.UploadError))
+check("a missing piece keeps the session so the browser can resend it", os.path.isdir(os.path.join(base, "_tmp", sess["sid"])))
+up.save_chunk(sess["sid"], 1, piece(1), base)
+mc = up.finish_chunked(sess["sid"], "asha", base)
+with open(os.path.join(base, mc["id"], "orig1.pdf"), "rb") as f:
+    check("pieces are joined in order into the exact file", f.read() == data)
+check("session folder is gone after finish", not os.path.exists(os.path.join(base, "_tmp", sess["sid"])))
+check("name is cleaned and the upload waits to be read", "/" not in mc["name"] and ".." not in mc["name"] and mc["status"] == "processing" and mc["uploader"] == "asha")
+check("temporary folder is not listed as an upload", all(u["id"] != "_tmp" for u in up.list_uploads(base)))
+
+sess2 = up.begin_chunked("short.pdf", 10 * MB, base)
+up.save_chunk(sess2["sid"], 0, PDF + b"0" * (8 * MB - len(PDF)), base)
+up.save_chunk(sess2["sid"], 1, b"0" * (1 * MB), base)
+check("finish with fewer bytes than announced is refused and cleaned", raises(lambda: up.finish_chunked(sess2["sid"], "u", base), up.UploadError) and not os.path.exists(os.path.join(base, "_tmp", sess2["sid"])))
+
+old_sess = up.begin_chunked("old.pdf", 1000, base)
+past = os.path.getmtime(os.path.join(base, "_tmp", old_sess["sid"])) - 7 * 3600
+os.utime(os.path.join(base, "_tmp", old_sess["sid"]), (past, past))
+up.begin_chunked("new.pdf", 1000, base)
+check("stale sessions (older than 6 hours) are cleaned up", not os.path.exists(os.path.join(base, "_tmp", old_sess["sid"])))
+
 run(client.aclose())
 print("%d passed, %d failed" % (passed, failed))
 sys.exit(1 if failed else 0)
