@@ -962,3 +962,29 @@ input:checked + .slider:before {
     background: rgba(239, 68, 68, 0.25);
     color: #ffffff;
 }
+
+/* Upload & Scan Documents */
+.doc-drop { border: 2px dashed var(--border-glow); border-radius: var(--radius-md); padding: 16px; text-align: center; margin-bottom: 8px; transition: var(--transition); }
+.doc-drop.drag { background: rgba(99, 102, 241, 0.1); border-color: var(--accent-primary); }
+.doc-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+.doc-pick { cursor: pointer; display: inline-flex; align-items: center; min-height: 40px; }
+.doc-scan-only { display: none; }
+@media (pointer: coarse), (max-width: 760px) { .doc-scan-only { display: inline-flex; } .doc-drop > p:first-child { display: none; } }
+.doc-sub { font-size: 0.74rem; color: var(--text-muted); }
+.doc-actions { white-space: nowrap; text-align: right; }
+.scan-tray { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0; }
+.scan-thumb { position: relative; width: 70px; height: 90px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color); }
+.scan-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.scan-thumb span { position: absolute; left: 3px; bottom: 3px; background: rgba(0,0,0,.65); color: #fff; font-size: .7rem; padding: 0 5px; border-radius: 4px; }
+.scan-thumb button { position: absolute; right: 2px; top: 2px; background: rgba(0,0,0,.65); color: #fff; border: 0; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; font-size: .7rem; }
+.doc-review { margin-top: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; }
+.doc-review-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.doc-page { margin: 10px 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.doc-page.doc-flag { border-color: rgba(245, 158, 11, 0.6); }
+.doc-page-head { padding: 6px 10px; font-size: 0.78rem; color: var(--text-secondary); background: rgba(255,255,255,.03); }
+.doc-page-body { display: flex; gap: 10px; padding: 10px; align-items: flex-start; }
+.doc-img { width: 140px; max-height: 200px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-color); background: #fff; }
+.doc-text { flex: 1; min-height: 150px; resize: vertical; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px; font: inherit; font-size: 0.85rem; line-height: 1.5; }
+.doc-review-actions { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+.doc-card .hidden { display: none !important; }
+@media (max-width: 640px) { .doc-page-body { flex-direction: column; } .doc-img { width: 100%; max-height: 260px; } }
