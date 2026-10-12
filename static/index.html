@@ -192,63 +192,6 @@
                 </div>
             </section>
         </div>
-
-        <!-- GENERATIVE AI RAG CHAT CONSOLE -->
-        <section class="card chat-card">
-            <div class="card-header">
-                <div>
-                    <h2>💬 Chat with Axom AI (Generative RAG)</h2>
-                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
-                        Answers strictly generated from your crawled web knowledge with source links.
-                    </p>
-                </div>
-                <div class="chat-controls">
-                    <select id="llmProviderSelect" class="select-sm">
-                        <option value="auto">Provider: Auto-Detect</option>
-                        <option value="gemini">Google Gemini API</option>
-                        <option value="ollama">Local Ollama</option>
-                        <option value="fallback">Local Synthesizer</option>
-                    </select>
-                    <button id="apiKeyToggleBtn" class="btn-xs" title="Configure optional API keys">⚙️ Key</button>
-                </div>
-            </div>
-
-            <!-- Optional API Key Drawer -->
-            <div id="apiKeyDrawer" class="api-key-drawer hidden">
-                <div class="api-key-row">
-                    <label for="geminiApiKeyInput">Google Gemini API Key (Optional):</label>
-                    <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy... (leave blank for local synthesizer)">
-                    <button id="saveApiKeyBtn" class="btn-secondary btn-xs">Save</button>
-                </div>
-            </div>
-
-            <!-- Chat Stream Window -->
-            <div class="chat-container">
-                <div id="chatMessages" class="chat-messages">
-                    <div class="chat-message bot">
-                        <div class="msg-avatar">⚡</div>
-                        <div class="msg-content">
-                            <p>নমস্কাৰ! Hello! I am <strong>Axom AI</strong>. You can ask me questions about any indexed websites in <strong>English, অসমীয়া (Assamese), or हिंदी (Hindi)</strong>. Index a dataset below to get started!</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Chat Input Form -->
-                <form id="chatForm" class="chat-input-form">
-                    <input 
-                        type="text" 
-                        id="chatInput" 
-                        placeholder="Ask a question about crawled websites (e.g. 'What is this domain used for?')..." 
-                        required
-                        autocomplete="off"
-                    >
-                    <button type="submit" id="chatSendBtn" class="btn btn-primary" style="width: auto; padding: 0 20px;">
-                        <span>Send</span>
-                    </button>
-                </form>
-            </div>
-        </section>
-
         <!-- Bottom: Crawled Datasets Table -->
         <section class="card history-card" style="margin-top: 24px;">
             <div class="card-header">
