@@ -180,6 +180,13 @@ check("single page document keeps the plain name", up.build_pages(up.read_meta(m
 check("empty pages are left out", up.build_pages({"id": "x", "name": "n", "pages": [{"n": 1, "text": " "}]}) == [])
 ap = up.mark(m["id"], "approved", "admin", base, job_id="doc-" + m["id"])
 check("approved", ap["status"] == "approved" and ap["job_id"] == "doc-" + m["id"] and ap["reviewed_by"] == "admin")
+check("approving marks the send as in progress", ap["send_status"] == "sending")
+up.set_send_status(m["id"], False, base)
+check("a failed send is recorded (admin can send again)", up.read_meta(m["id"], base)["send_status"] == "failed")
+up.set_send_status(m["id"], True, base)
+check("a successful send is recorded", up.read_meta(m["id"], base)["send_status"] == "sent" and up.list_uploads(base)[0].get("send_status") in ("sent", "failed", "sending", None))
+up.mark(m["id"], "approved", "admin", base)
+check("sending again starts from sending", up.read_meta(m["id"], base)["send_status"] == "sending")
 check("cannot reject twice from failed", raises(lambda: up.mark(r5["id"], "rejected", "a", base), up.UploadError))
 check("listing", len(up.list_uploads(base)) >= 6 and up.list_uploads(base)[0]["created_at"] >= up.list_uploads(base)[-1]["created_at"])
 

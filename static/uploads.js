@@ -1,25 +1,25 @@
-// Upload & Scan Documents: files (or phone-camera scans) -> text -> the admin checks it -> Axom AI chat.
+// Upload & Scan Documents: files (or phone-camera scans) -> text -> approved by the admin (Axom AI admin panel > Document Verify) -> Axom AI chat.
+// This panel only uploads and shows where each document is; approving is done in the admin panel.
 (function () {
     const MAX_BYTES = 20 * 1024 * 1024;
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     let scans = [];          // pictures taken with the camera, not sent yet: [{blob, url}]
     let timer = null;
-    let openId = null;
 
     const STATUS = {
-        processing: ['Reading…', 'badge-running'],
-        review: ['Needs your review', 'badge-idle'],
-        approved: ['Sent to Axom AI', 'badge-completed'],
-        rejected: ['Rejected', 'badge-failed'],
-        failed: ['Failed', 'badge-failed'],
+        processing: ['Reading the text…', 'processing'],
+        review: ['Waiting for admin approval', 'review'],
+        approved: ['Approved', 'approved'],
+        rejected: ['Rejected by admin', 'rejected'],
+        failed: ['Could not be read', 'failed'],
     };
 
     function say(msg, bad) {
         const el = $('docMessage');
         if (!el) return;
         el.textContent = msg || '';
-        el.style.color = bad ? '#fb7185' : 'var(--text-muted)';
+        el.classList.toggle('bad', !!bad);
     }
 
     async function api(url, opts) {
@@ -42,7 +42,7 @@
         say('Uploading…');
         try {
             await api('/api/upload', { method: 'POST', body: fd });
-            say('Uploaded. The text is being read; it will wait here for your approval.');
+            say('Uploaded. The text is being read; an admin will check it before Axom AI learns from it.');
             await refresh();
         } catch (e) {
             say(e.message, true);
@@ -113,7 +113,7 @@
         say('Preparing the page…');
         const blob = await enhance(file);
         scans.push({ blob: blob, url: URL.createObjectURL(blob) });
-        say('');
+        say('Page ' + scans.length + ' added. Scan more pages, or send them.');
         renderTray();
     }
 
@@ -126,88 +126,50 @@
     }
 
     // ---------------------------------------------------------------- the list
+    function card(u) {
+        const st = STATUS[u.status] || [u.status, 'review'];
+        const icon = u.kind === 'pdf' ? '📕' : '🖼️';
+        const when = (u.created_at || '').replace('T', ' ').slice(0, 16);
+        const chips = [];
+        if (u.page_count) chips.push('<span class="doc-chip">' + u.page_count + ' page' + (u.page_count === 1 ? '' : 's') + '</span>');
+        (u.engines || []).forEach((e) => chips.push('<span class="doc-chip">' + esc(e) + '</span>'));
+        if (u.status === 'review' && u.review_pages) chips.push('<span class="doc-chip warn">' + u.review_pages + ' to double-check</span>');
+        let note = '';
+        if (u.status === 'review') note = '<p class="doc-note">An admin will read and approve it in the admin panel (Document Verify). Nothing reaches Axom AI before that.</p>';
+        if (u.status === 'approved') {
+            if (u.send_status === 'sent') note = '<p class="doc-note">Approved and sent to Axom AI chat.</p>';
+            else if (u.send_status === 'failed') note = '<p class="doc-note err">Approved, but sending to Axom AI chat failed. An admin can send it again from Document Verify.</p>';
+            else note = '<p class="doc-note">Approved. Sending to Axom AI chat…</p>';
+        }
+        if (u.status === 'rejected') note = '<p class="doc-note">The admin did not approve this document.</p>';
+        if (u.error) note = '<p class="doc-note err">' + esc(u.error) + '</p>';
+        return '<div class="doc-item"><div class="doc-item-top"><span class="doc-item-icon">' + icon + '</span><div style="min-width:0"><div class="doc-item-name">' + esc(u.name) +
+            '</div><div class="doc-item-sub">' + esc(when) + (u.uploader ? ' · ' + esc(u.uploader) : '') + '</div></div></div>' +
+            '<span class="doc-pill ' + st[1] + '">' + esc(st[0]) + '</span>' +
+            (u.status === 'processing' ? '<div class="doc-shimmer"></div>' : '') +
+            (chips.length ? '<div class="doc-chips">' + chips.join('') + '</div>' : '') + note + '</div>';
+    }
+
     async function refresh() {
         let data;
         try { data = await api('/api/upload/list'); } catch (e) { return; }
         const rows = data.uploads || [];
-        $('docUsage').textContent = data.pages_used_today + ' / ' + data.daily_limit + ' pages read by AI today';
+        const used = data.pages_used_today || 0, limit = data.daily_limit || 0;
+        $('docUsage').textContent = used + ' / ' + limit;
+        const fill = $('docMeterFill');
+        const pct = limit ? Math.min(100, Math.round(used * 100 / limit)) : 100;
+        fill.style.width = pct + '%';
+        fill.classList.toggle('high', pct >= 80);
         const ocr = data.ocr || {};
         const warn = [];
-        if (!ocr.poppler) warn.push('PDF reading is not installed on the server yet (poppler-utils)');
-        if (!ocr.gemini && !ocr.openai) warn.push('no Gemini / OpenAI key: only Tesseract is available');
-        $('docWarn').textContent = warn.join(' · ');
+        if (!ocr.poppler) warn.push('PDF reading is not installed on the server yet (poppler-utils).');
+        if (!ocr.gemini && !ocr.openai) warn.push('No Gemini / OpenAI key found: only Tesseract is available, so results need more checking.');
+        $('docWarn').textContent = warn.join(' ');
         $('docWarn').classList.toggle('hidden', !warn.length);
-        const body = $('docRows');
-        body.innerHTML = rows.length ? rows.map((u) => {
-            const st = STATUS[u.status] || [u.status, 'badge-idle'];
-            const extra = u.status === 'review' && u.review_pages ? ' · ' + u.review_pages + ' to check' : '';
-            return '<tr><td>' + esc(u.name) + '<div class="doc-sub">' + esc((u.created_at || '').replace('T', ' ').slice(0, 16)) + ' · ' + esc(u.uploader) + '</div></td>' +
-                '<td>' + (u.page_count || 0) + '</td>' +
-                '<td>' + esc((u.engines || []).join(', ')) + '</td>' +
-                '<td><span class="badge ' + st[1] + '">' + esc(st[0]) + '</span>' + esc(extra) + (u.error ? '<div class="doc-sub" style="color:#fb7185">' + esc(u.error) + '</div>' : '') + '</td>' +
-                '<td class="doc-actions">' +
-                (u.status === 'review' || u.status === 'approved' ? '<button class="btn-secondary btn-sm" data-open="' + u.id + '">' + (u.status === 'review' ? 'Review' : 'View') + '</button> ' : '') +
-                (u.status !== 'processing' ? '<button class="btn-xs" data-del="' + u.id + '" title="Delete">🗑</button>' : '') + '</td></tr>';
-        }).join('') : '<tr><td colspan="5" class="doc-sub" style="padding:14px">Nothing uploaded yet.</td></tr>';
-        body.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openReview(b.dataset.open)));
-        body.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => removeUpload(b.dataset.del)));
-        const busy = rows.some((u) => u.status === 'processing');
+        $('docRows').innerHTML = rows.length ? rows.map(card).join('') : '<p class="doc-empty">Nothing uploaded yet. Your first document will appear here.</p>';
+        const busy = rows.some((u) => u.status === 'processing' || u.send_status === 'sending');
         if (busy && !timer) timer = setInterval(refresh, 3000);
         if (!busy && timer) { clearInterval(timer); timer = null; }
-    }
-
-    async function removeUpload(id) {
-        if (!confirm('Delete this upload and its text?')) return;
-        try { await api('/api/upload/' + id, { method: 'DELETE' }); if (openId === id) closeReview(); await refresh(); } catch (e) { say(e.message, true); }
-    }
-
-    // ---------------------------------------------------------------- review
-    function closeReview() { openId = null; $('docReview').classList.add('hidden'); $('docReview').innerHTML = ''; }
-
-    async function openReview(id) {
-        let m;
-        try { m = await api('/api/upload/' + id); } catch (e) { say(e.message, true); return; }
-        openId = id;
-        const editable = m.status === 'review';
-        const box = $('docReview');
-        box.classList.remove('hidden');
-        box.innerHTML =
-            '<div class="doc-review-head"><strong>' + esc(m.name) + '</strong>' +
-            '<button class="btn-xs" id="docCloseReview">Close</button></div>' +
-            (editable ? '<p class="doc-sub">Read each page, fix mistakes, then approve. Nothing reaches Axom AI before you approve. Pages marked ⚠ need a closer look.</p>' : '') +
-            m.pages.map((p) =>
-                '<div class="doc-page' + (p.review ? ' doc-flag' : '') + '">' +
-                '<div class="doc-page-head">Page ' + p.n + ' · ' + esc(p.engine) + (p.review ? ' · ⚠ ' + esc(p.reason) : '') + (p.edited ? ' · edited' : '') + '</div>' +
-                '<div class="doc-page-body">' +
-                (p.image ? '<a href="/api/upload/' + id + '/image/' + encodeURIComponent(p.image) + '" target="_blank" rel="noopener"><img class="doc-img" src="/api/upload/' + id + '/image/' + encodeURIComponent(p.image) + '" alt="page ' + p.n + '"></a>' : '') +
-                '<textarea class="doc-text" data-page="' + p.n + '" ' + (editable ? '' : 'readonly') + ' spellcheck="false">' + esc(p.text) + '</textarea></div></div>'
-            ).join('') +
-            (editable ? '<div class="doc-review-actions"><button class="btn btn-primary" id="docApprove" style="width:auto;padding:0 18px">✅ Approve &amp; send to Axom AI</button> <button class="btn-secondary btn-sm" id="docReject">Reject</button></div>' : '') +
-            (m.status === 'approved' ? '<div class="doc-review-actions"><button class="btn-secondary btn-sm" id="docResend">Send again</button></div>' : '');
-        $('docCloseReview').addEventListener('click', closeReview);
-        if (editable) {
-            box.querySelectorAll('textarea[data-page]').forEach((t) => {
-                const orig = t.value;
-                t.addEventListener('change', async () => {
-                    try { await api('/api/upload/' + id + '/page/' + t.dataset.page, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t.value }) }); t.dataset.saved = '1'; say('Saved page ' + t.dataset.page + '.'); }
-                    catch (e) { t.value = orig; say(e.message, true); }
-                });
-            });
-            $('docApprove').addEventListener('click', async () => {
-                if (!confirm('Send this text to Axom AI chat? The chat will start answering from it.')) return;
-                try { await api('/api/upload/' + id + '/approve', { method: 'POST' }); say('Approved. It is being sent to Axom AI.'); closeReview(); refresh(); }
-                catch (e) { say(e.message, true); }
-            });
-            $('docReject').addEventListener('click', async () => {
-                try { await api('/api/upload/' + id + '/reject', { method: 'POST' }); closeReview(); refresh(); } catch (e) { say(e.message, true); }
-            });
-        }
-        if (m.status === 'approved' && $('docResend')) {
-            $('docResend').addEventListener('click', async () => {
-                try { await api('/api/upload/' + id + '/resend', { method: 'POST' }); say('Sending again.'); } catch (e) { say(e.message, true); }
-            });
-        }
-        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     // ---------------------------------------------------------------- start

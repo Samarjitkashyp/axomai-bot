@@ -69,7 +69,7 @@ def list_uploads(base: Optional[str] = None) -> List[Dict[str, Any]]:
             continue
         m = read_meta(uid, base)
         if m:
-            out.append({k: m.get(k) for k in ("id", "name", "kind", "size", "uploader", "created_at", "status", "error", "page_count", "job_id")}
+            out.append({k: m.get(k) for k in ("id", "name", "kind", "size", "uploader", "created_at", "status", "error", "page_count", "job_id", "send_status")}
                         | {"review_pages": sum(1 for p in m.get("pages", []) if p.get("review")), "engines": sorted({p.get("engine") for p in m.get("pages", []) if p.get("engine")})})
     out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return out
@@ -257,10 +257,21 @@ def mark(uid: str, status: str, user: str, base: Optional[str] = None, job_id: s
         raise UploadError("This upload is not waiting for review.")
     meta["status"] = status
     meta["reviewed_by"], meta["reviewed_at"] = user, now()
+    if status == "approved":
+        meta["send_status"] = "sending"
     if job_id:
         meta["job_id"] = job_id
     write_meta(meta, base)
     return meta
+
+
+def set_send_status(uid: str, ok: bool, base: Optional[str] = None) -> None:
+    """Whether the approved text arrived in the chat ("sent") or not ("failed": the admin can send it again)."""
+    meta = read_meta(uid, base)
+    if meta:
+        meta["send_status"] = "sent" if ok else "failed"
+        meta["sent_at"] = now()
+        write_meta(meta, base)
 
 
 def delete_upload(uid: str, base: Optional[str] = None) -> bool:

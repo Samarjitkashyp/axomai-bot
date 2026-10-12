@@ -58,11 +58,35 @@ app.add_middleware(
 )
 
 
+def _admin_panel_user(request: Request):
+    """The Axom AI admin panel (Document Verify) talks to the upload API with the shared bot token (the same one the chat import uses)
+    and names the admin in X-Admin-User. Only /api/upload* accepts this."""
+    import hmac
+    expected = os.getenv("BOT_IMPORT_TOKEN", "")
+    given = request.headers.get("X-Bot-Token", "")
+    if expected and given and hmac.compare_digest(given.encode(), expected.encode()):
+        return {"id": 0, "username": (request.headers.get("X-Admin-User") or "admin-panel")[:60], "is_superuser": True}
+    return None
+
+
+def _admin_only(request: Request):
+    """Approving, editing, rejecting, deleting uploads is for the admin panel only (not for every bot user)."""
+    if not getattr(request.state, "via_admin_panel", False):
+        raise HTTPException(status_code=403, detail="Documents are approved in the Axom AI admin panel (Document Verify).")
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if path.startswith("/static") or path.startswith("/docs") or path.startswith("/openapi") or path in PUBLIC_PATHS:
             return await call_next(request)
+        request.state.via_admin_panel = False
+        if path.startswith("/api/upload"):
+            panel = _admin_panel_user(request)
+            if panel:
+                request.state.user = panel
+                request.state.via_admin_panel = True
+                return await call_next(request)
         user = get_current_user(request)
         if not user:
             return RedirectResponse("/login", status_code=302)
@@ -152,16 +176,22 @@ CHAT_IMPORT_URL = os.getenv("CHAT_IMPORT_URL", "http://127.0.0.1:8000/api/import
 BOT_IMPORT_TOKEN = os.getenv("BOT_IMPORT_TOKEN", "")
 
 
+def _import_ok(outcome) -> bool:
+    totals = (outcome or {}).get("totals") or {}
+    return not (totals.get("failed_batches") or totals.get("aborted"))
+
+
 async def _push_to_chat(job_id: str, seed_url: str):
+    """Sends a saved crawl to the chat. Returns True when it arrived (or nothing was left to send), False when it did not."""
     if not BOT_IMPORT_TOKEN:
         _import_logger.warning("BOT_IMPORT_TOKEN not set — skipping chat import")
-        return
+        return False
     data = storage_manager.get_crawl_job(job_id)
     if not data:
-        return
+        return False
     pages = data.get("pages", [])
     if not pages:
-        return
+        return True
     # AXOMAI-BATCH: batches of 200 pages with retries (a single huge request could time out and lose the whole crawl)
     from app.chat_import import push_pages
 
@@ -174,8 +204,8 @@ async def _push_to_chat(job_id: str, seed_url: str):
         from app.auth import get_db_conn
         outcome = await push_with_passages(_push, seed_url, job_id, pages, get_db_conn)
         _import_logger.info("Chat import %s: %s", seed_url, {k: v for k, v in outcome.items() if k != "totals"})
-        return
-    await _push(pages)
+        return _import_ok(outcome)
+    return _import_ok({"totals": await _push(pages)})
 
 
 # --- Crawler Endpoints ---
@@ -632,6 +662,7 @@ async def upload_image(uid: str, name: str):
 
 @app.put("/api/upload/{uid}/page/{n}")
 async def edit_upload_page(uid: str, n: int, request: Request):
+    _admin_only(request)
     body = await request.json()
     text = body.get("text")
     if not isinstance(text, str) or len(text) > 200000:
@@ -653,11 +684,13 @@ async def _approve_and_send(uid: str):
     storage_manager.save_crawl_job(job_id, seed, "completed", pages,
                                    {"started_at": meta["created_at"], "completed_at": now_iso, "source": "upload",
                                     "file_name": meta["name"], "engines": sorted({p.get("engine") for p in meta["pages"]})})
-    await _push_to_chat(job_id, seed)
+    ok = await _push_to_chat(job_id, seed)
+    upl.set_send_status(uid, bool(ok))
 
 
 @app.post("/api/upload/{uid}/approve")
 async def approve_upload(uid: str, request: Request, background_tasks: BackgroundTasks):
+    _admin_only(request)
     meta = _upload_or_404(uid)
     if meta["status"] != "review":
         raise HTTPException(status_code=400, detail="This upload is not waiting for review.")
@@ -670,16 +703,19 @@ async def approve_upload(uid: str, request: Request, background_tasks: Backgroun
 
 
 @app.post("/api/upload/{uid}/resend")
-async def resend_upload(uid: str, background_tasks: BackgroundTasks):
+async def resend_upload(uid: str, request: Request, background_tasks: BackgroundTasks):
+    _admin_only(request)
     meta = _upload_or_404(uid)
     if meta["status"] != "approved":
         raise HTTPException(status_code=400, detail="Only approved uploads can be sent again.")
+    upl.mark(uid, "approved", getattr(request.state, "user", {}).get("username", ""), job_id="doc-" + uid)
     background_tasks.add_task(_approve_and_send, uid)
     return {"ok": True}
 
 
 @app.post("/api/upload/{uid}/reject")
 async def reject_upload(uid: str, request: Request):
+    _admin_only(request)
     _upload_or_404(uid)
     try:
         upl.mark(uid, "rejected", getattr(request.state, "user", {}).get("username", ""))
@@ -689,7 +725,8 @@ async def reject_upload(uid: str, request: Request):
 
 
 @app.delete("/api/upload/{uid}")
-async def delete_upload(uid: str):
+async def delete_upload(uid: str, request: Request):
+    _admin_only(request)
     meta = _upload_or_404(uid)
     if meta["status"] == "processing":
         raise HTTPException(status_code=400, detail="It is still being read.")
