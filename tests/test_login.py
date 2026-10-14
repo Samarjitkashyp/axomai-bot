@@ -171,6 +171,8 @@ if main is not None:
     r = post(c, "boss", "right-pass", tok)
     t("the right login works: redirect to / and a session cookie", r.status_code == 302 and r.headers["location"] == "/" and "axomai_bot_session" in r.headers.get("set-cookie", ""))
     t("remember was off: the cookie has no max-age", "max-age" not in [x for x in r.headers.get_list("set-cookie") if "axomai_bot_session" in x][0].lower())
+    c = new_client()                                                # (a signed-in browser is sent away from /login: a new one for the next tries)
+    _, tok = page_csrf(c)
     r2 = post(c, "boss", "nope", tok)
     t("the success wiped the earlier wrong tries", "2 attempt" in r2.text)
     r = post(c, "boss", "right-pass", tok, remember="on")
