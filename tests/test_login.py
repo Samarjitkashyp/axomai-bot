@@ -162,6 +162,7 @@ if main is not None:
     t("a wrong csrf token is refused and not counted", r.status_code == 403 and rows(db2, "SELECT count(*) FROM superadmin_superadminloginattempt")[0][0] == 0)
     r = new_client().post("/login", data={"username": "boss", "password": "right-pass"}, headers={"x-real-ip": "7.7.7.7"})
     t("no token at all is refused", r.status_code == 403)
+    r, tok = page_csrf(c)                                           # a refused page hands out a fresh token (and cookie): take it
 
     r = post(c, "boss", "nope", tok)
     t("wrong password: 401, 2 attempts left, the username kept", r.status_code == 401 and "2 attempt" in r.text and 'value="boss"' in r.text)
