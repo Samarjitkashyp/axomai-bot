@@ -3,6 +3,7 @@ import io
 import csv
 import json
 import uuid
+import secrets
 import asyncio
 import logging
 import httpx
@@ -18,8 +19,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth import (
     authenticate_user, create_session_cookie, get_current_user,
-    LOGIN_PAGE_HTML, COOKIE_NAME, PUBLIC_PATHS,
+    COOKIE_NAME, PUBLIC_PATHS, get_db_conn,
 )
+from app.login_guard import LoginGuard, client_ip as _login_ip, sanitize as _login_clean
+from app.login_page import render_login
 from app.scheduler import (
     register_crawl, set_schedule_enabled, remove_schedule,
     get_all_schedules, scheduler_loop,
@@ -114,33 +117,107 @@ async def stop_scheduler():
         _scheduler_task.cancel()
 
 
+CSRF_COOKIE = "axomai_bot_csrf"
+login_guard = LoginGuard(get_db_conn)
+
+
+def _login_response(html: str, status: int = 200, csrf: str = ""):
+    """A login page: never cached, not framed, with the visitor's CSRF cookie (the same value is in the form)."""
+    resp = HTMLResponse(html, status_code=status)
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    if csrf:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=3600, httponly=True, secure=True, samesite="strict")
+    return resp
+
+
+def _request_ip(request: Request) -> str:
+    return _login_ip(request.headers, request.client.host if request.client else "")
+
+
 @app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return HTMLResponse(LOGIN_PAGE_HTML.replace("{error}", ""))
+async def login_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse("/", status_code=302)
+    ip = _request_ip(request)
+    csrf = request.cookies.get(CSRF_COOKIE) or uuid.uuid4().hex + uuid.uuid4().hex
+    try:
+        lock = await asyncio.to_thread(login_guard.active_lockout, ip, "")
+    except Exception:
+        lock = {"is_locked": False}
+    if lock.get("is_locked"):
+        msg = (f"Security Lockout Active: Too many failed login attempts. This IP address is locked for 24 hours "
+               f"({lock['hours']}h {lock['mins']}m remaining). For security, unauthorized brute force requests are blocked.")
+        return _login_response(render_login(error=msg, is_locked=True, lockout=lock, remaining=0, client_ip=ip, csrf=csrf), csrf=csrf)
+    return _login_response(render_login(client_ip=ip, csrf=csrf), csrf=csrf)
 
 
 @app.post("/login")
-async def login_submit(username: str = Form(...), password: str = Form(...)):
-    user = authenticate_user(username, password)
-    if not user:
-        html = LOGIN_PAGE_HTML.replace(
-            "{error}",
-            '<div class="error">Invalid credentials or no bot access permission.</div>'
-        )
-        return HTMLResponse(html, status_code=401)
+async def login_submit(request: Request, username: str = Form(""), password: str = Form(""), csrf: str = Form(""), remember: str = Form("")):
+    ip = _request_ip(request)
+    ua = request.headers.get("user-agent", "")
+    cookie_csrf = request.cookies.get(CSRF_COOKIE) or ""
+    if not cookie_csrf or not csrf or not secrets.compare_digest(cookie_csrf, csrf):
+        # the page was opened too long ago, or the form came from somewhere else: nothing is checked, nothing is counted
+        fresh = uuid.uuid4().hex + uuid.uuid4().hex
+        return _login_response(render_login(error="This page expired. Please try again.", client_ip=ip, csrf=fresh), 403, fresh)
+
+    u = _login_clean(username, 150)
+    p = _login_clean(password, 256)
+
+    def locked_page(lock, who):
+        h, m = lock["hours"], lock["mins"]
+        if who == "user":
+            msg = f"Security Lockout Active: Account '{u}' is locked for 24 hours ({h}h {m}m remaining). Contact system administrator."
+        else:
+            msg = ("Extreme Security Lockout: 3 consecutive failed login attempts detected. Your IP address and account have been LOCKED FOR 24 HOURS. "
+                   "All further attempts are automatically blocked.") if who == "new" else (
+                f"Security Lockout Active: Too many failed login attempts. This IP address is locked for 24 hours ({h}h {m}m remaining).")
+        return _login_response(render_login(error=msg, is_locked=True, lockout=lock, remaining=0, client_ip=ip, last_username=u, csrf=cookie_csrf), 429, cookie_csrf)
+
+    try:
+        lock = await asyncio.to_thread(login_guard.active_lockout, ip, u)
+    except Exception:
+        return _login_response(render_login(error="Sign-in is temporarily unavailable. Please try again in a minute.", client_ip=ip, last_username=u, csrf=cookie_csrf), 503, cookie_csrf)
+    if lock.get("is_locked"):
+        return locked_page(lock, "user" if u else "ip")
+
+    status, user = await asyncio.to_thread(authenticate_user, u, p) if (u and p) else ("bad", None)
+
+    if status == "error":
+        return _login_response(render_login(error="Sign-in is temporarily unavailable. Please try again in a minute.", client_ip=ip, last_username=u, csrf=cookie_csrf), 503, cookie_csrf)
+
+    if status != "ok":
+        denied = status == "denied"
+        await asyncio.to_thread(login_guard.audit, "BOT_LOGIN_DENIED" if denied else "BOT_LOGIN_FAILED", f"Username: {u}",
+                                "Password right, no bot access" if denied else "Invalid credentials provided", ip)
+        fail = await asyncio.to_thread(login_guard.record_failed, ip, u, ua)
+        if fail.get("is_locked"):
+            return locked_page({"hours": 24, "mins": 0}, "new")
+        rem = fail.get("remaining_attempts", 1)
+        s_ = "s" if rem != 1 else ""
+        if denied:
+            msg = f"Unauthorized: this account has no access to the Crawler Bot. ({rem} attempt{s_} remaining)"
+        else:
+            msg = (f"Invalid credentials. Warning: {rem} attempt{s_} remaining before a mandatory 24-HOUR SECURITY LOCKOUT.")
+        return _login_response(render_login(error=msg, remaining=rem, client_ip=ip, last_username=u, csrf=cookie_csrf), 401, cookie_csrf)
+
+    await asyncio.to_thread(login_guard.clear_failed, ip, u)
+    await asyncio.to_thread(login_guard.audit, "BOT_LOGIN_SUCCESS", f"User: {user['username']}", "Logged into the Crawler Bot", ip)
     response = RedirectResponse("/", status_code=302)
-    response.set_cookie(
-        COOKIE_NAME,
-        create_session_cookie(user),
-        max_age=86400 * 7,
-        httponly=True,
-        samesite="lax",
-    )
+    kwargs = {"max_age": 86400 * 7} if remember else {}              # "remember" off: the cookie lasts until the browser is closed
+    response.set_cookie(COOKIE_NAME, create_session_cookie(user), httponly=True, secure=True, samesite="lax", **kwargs)
+    response.delete_cookie(CSRF_COOKIE)
     return response
 
 
 @app.get("/logout")
-async def logout():
+async def logout(request: Request):
+    user = get_current_user(request)
+    if user:
+        await asyncio.to_thread(login_guard.audit, "BOT_LOGOUT", f"User: {user.get('username', '')}", "", _request_ip(request))
     response = RedirectResponse("/login", status_code=302)
     response.delete_cookie(COOKIE_NAME)
     return response
