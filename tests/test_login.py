@@ -193,6 +193,8 @@ if main is not None:
     r = c.post("/login", data={"username": "boss", "password": "right-pass", "csrf": tok}, headers={"x-real-ip": "8.8.8.8"})
     t("another IP is not locked (but the name 'noaccess' would be)", r.status_code == 302)
     clock2.t += timedelta(hours=24, minutes=1)
+    c = new_client()
+    _, tok = page_csrf(c)
     r = post(c, "boss", "right-pass", tok)
     t("after 24 hours the same IP can sign in again", r.status_code == 302)
 
