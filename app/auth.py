@@ -1,5 +1,6 @@
 import os
 import hashlib
+import hmac
 import base64
 import psycopg2
 from functools import lru_cache
@@ -40,10 +41,12 @@ def verify_django_password(plain: str, encoded: str) -> bool:
     dk = hashlib.pbkdf2_hmac(
         "sha256", plain.encode(), salt.encode(), int(iterations)
     )
-    return base64.b64encode(dk).decode() == stored_hash
+    return hmac.compare_digest(base64.b64encode(dk).decode(), stored_hash)
 
 
-def authenticate_user(username: str, password: str) -> Optional[Dict]:
+def authenticate_user(username: str, password: str):
+    """(status, user): "ok" (the user), "bad" (unknown user, inactive, or wrong password: one answer, so nothing is given away),
+    "denied" (the password is right but the account has no bot access), or "error" (the database could not be read: not the visitor's fault)."""
     try:
         conn = get_db_conn()
         cur = conn.cursor()
@@ -56,22 +59,19 @@ def authenticate_user(username: str, password: str) -> Optional[Dict]:
         if not row:
             cur.close()
             conn.close()
-            return None
+            _burn_time(password)
+            return "bad", None
 
         uid, uname, pw_hash, is_active, is_superuser = row
-        if not is_active:
+        if not is_active or not verify_django_password(password, pw_hash):
             cur.close()
             conn.close()
-            return None
-        if not verify_django_password(password, pw_hash):
-            cur.close()
-            conn.close()
-            return None
+            return "bad", None
 
         if is_superuser:
             cur.close()
             conn.close()
-            return {"id": uid, "username": uname, "is_superuser": True}
+            return "ok", {"id": uid, "username": uname, "is_superuser": True}
 
         cur.execute(
             "SELECT bot_access FROM superadmin_subdomainpermission WHERE user_id = %s",
@@ -82,11 +82,19 @@ def authenticate_user(username: str, password: str) -> Optional[Dict]:
         conn.close()
 
         if not perm or not perm[0]:
-            return None
+            return "denied", None
 
-        return {"id": uid, "username": uname, "is_superuser": False}
+        return "ok", {"id": uid, "username": uname, "is_superuser": False}
     except Exception:
-        return None
+        return "error", None
+
+
+def _burn_time(password: str) -> None:
+    """An unknown username takes as long to answer as a known one with a wrong password (no guessing of usernames by timing)."""
+    try:
+        verify_django_password(password, "pbkdf2_sha256$870000$timing$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    except Exception:
+        pass
 
 
 def create_session_cookie(user: Dict) -> str:
@@ -102,55 +110,3 @@ def get_current_user(request: Request) -> Optional[Dict]:
         return data
     except (BadSignature, SignatureExpired):
         return None
-
-
-LOGIN_PAGE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login — Axom AI Crawler Bot</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{min-height:100vh;display:flex;align-items:center;justify-content:center;
-background:#0a0a1a;font-family:'Segoe UI',system-ui,sans-serif;color:#e2e8f0}
-.card{background:#111827;border:1px solid #1e293b;border-radius:20px;padding:40px 36px;
-width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
-.logo{text-align:center;margin-bottom:24px}
-.logo h1{font-size:22px;font-weight:700;color:#fff}
-.logo h1 span{color:#f59e0b}
-.logo p{font-size:12px;color:#64748b;margin-top:4px}
-.field{margin-bottom:16px}
-.field label{display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px}
-.field input{width:100%;padding:10px 14px;background:#0f172a;border:1px solid #1e293b;
-border-radius:10px;color:#fff;font-size:14px;outline:none;transition:border 0.2s}
-.field input:focus{border-color:#f59e0b}
-.btn{width:100%;padding:12px;background:linear-gradient(135deg,#f59e0b,#d97706);
-color:#0f172a;font-weight:700;font-size:14px;border:none;border-radius:10px;
-cursor:pointer;transition:opacity 0.2s;margin-top:8px}
-.btn:hover{opacity:0.9}
-.error{background:#7f1d1d;border:1px solid #991b1b;border-radius:10px;padding:10px 14px;
-font-size:12px;color:#fca5a5;margin-bottom:16px;text-align:center}
-</style>
-</head>
-<body>
-<div class="card">
-<div class="logo">
-<h1>Axom AI <span>Crawler Bot</span></h1>
-<p>Authorized Access Only</p>
-</div>
-{error}
-<form method="POST" action="/login">
-<div class="field">
-<label>Username</label>
-<input type="text" name="username" required autofocus>
-</div>
-<div class="field">
-<label>Password</label>
-<input type="password" name="password" required>
-</div>
-<button type="submit" class="btn">Sign In</button>
-</form>
-</div>
-</body>
-</html>"""

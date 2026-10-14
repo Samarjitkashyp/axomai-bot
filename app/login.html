@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en" class="h-full bg-[#07090e] text-slate-100">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<title>Axom AI — Crawler Bot Console</title>
+<link rel="icon" type="image/png" href="https://aiaxom.co.in/axom-browser-logo.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  :root {
+    --primary-glow: #6366f1;
+    --violet-glow: #8b5cf6;
+    --emerald-glow: #10b981;
+  }
+  body { 
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background-color: #07090e;
+  }
+  .font-mono-code {
+    font-family: 'JetBrains Mono', monospace;
+  }
+  /* BROWSER AUTOFILL FIX: Prevent Chrome / Edge from turning dark inputs white */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus, 
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #0b1120 inset !important;
+    -webkit-text-fill-color: #f8fafc !important;
+    caret-color: #f8fafc !important;
+    transition: background-color 5000s ease-in-out 0s;
+    border-color: rgba(99, 102, 241, 0.4) !important;
+  }
+  .glass-card-obsidian {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(10, 15, 30, 0.95) 100%);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 50px -10px rgba(99, 102, 241, 0.15);
+  }
+  .glass-feature-card {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .bg-grid-cyber {
+    background-size: 48px 48px;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  }
+  .bg-radial-gradient {
+    background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.18), transparent 70%);
+  }
+  @keyframes floatSlow {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-8px) scale(1.015); }
+  }
+  @keyframes pulseGlow {
+    0%, 100% { opacity: 0.35; transform: scale(1); }
+    50% { opacity: 0.75; transform: scale(1.06); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+  }
+  .animate-float-1 { animation: floatSlow 6s ease-in-out infinite; }
+  .animate-float-2 { animation: floatSlow 8s ease-in-out infinite 1.5s; }
+  .animate-pulse-glow { animation: pulseGlow 6s ease-in-out infinite; }
+  .animate-shake { animation: shake 0.4s ease-in-out; }
+
+  @media screen and (max-width: 768px) {
+    input { font-size: 16px !important; }
+  }
+</style>
+</head>
+<body class="min-h-screen min-h-[100dvh] flex flex-col justify-between p-4 sm:p-6 lg:p-8 bg-[#07090e] relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+<!-- Cyber Grid Texture & Radial Ambient Glow -->
+<div class="fixed inset-0 bg-grid-cyber pointer-events-none z-0 opacity-70"></div>
+<div class="fixed inset-0 bg-radial-gradient pointer-events-none z-0"></div>
+
+<!-- Ambient Aurora Light Orbs -->
+<div class="fixed -top-48 -left-48 w-[36rem] h-[36rem] bg-indigo-600/20 rounded-full blur-[150px] pointer-events-none animate-pulse-glow"></div>
+<div class="fixed -bottom-48 -right-48 w-[40rem] h-[40rem] bg-purple-600/20 rounded-full blur-[160px] pointer-events-none animate-pulse-glow" style="animation-delay: 3s;"></div>
+<div class="fixed top-1/3 right-1/4 w-80 h-80 bg-violet-600/10 rounded-full blur-[140px] pointer-events-none"></div>
+
+<!-- Top Navigation & Live Engine Status Bar -->
+<header class="w-full max-w-7xl mx-auto flex items-center justify-between relative z-10 pb-4">
+  <div class="flex items-center gap-3.5">
+    <a href="https://aiaxom.co.in" target="_blank" class="flex items-center gap-3 group">
+      <div class="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 shadow-md group-hover:border-indigo-500/50 group-hover:scale-105 transition-all duration-200">
+        <img src="https://aiaxom.co.in/axom-browser-logo.png" alt="Axom AI" class="h-8 sm:h-9 w-auto object-contain">
+      </div>
+      <div>
+        <div class="text-sm sm:text-base font-black text-white tracking-tight flex items-center gap-1.5">
+          <span>Axom AI</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-mono font-semibold">CRAWLER BOT</span>
+        </div>
+        <div class="text-[10px] text-slate-400 font-medium hidden sm:block">Crawler, Document Reader &amp; Knowledge Ingestion</div>
+      </div>
+    </a>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <!-- Extreme Security Status Pill -->
+    <div class="hidden sm:inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/80 border border-indigo-500/30 text-xs font-medium text-slate-300 shadow-sm backdrop-blur-md">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+      </span>
+      <span class="text-slate-300 font-semibold">Sentry Protection</span>
+      <span class="text-slate-600">&bull;</span>
+      <span class="font-mono text-[11px] text-indigo-400">3-Strike 24h Lockout</span>
+    </div>
+
+    <!-- Public Site Link -->
+    <a href="https://aiaxom.co.in" target="_blank" rel="noopener noreferrer" 
+      class="group inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/40 text-xs font-semibold text-slate-300 hover:text-white transition-all shadow-sm">
+      <span>aiaxom.co.in</span>
+      <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-indigo-400 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"></i>
+    </a>
+  </div>
+</header>
+
+<!-- Main Center Area: Split Screen Showcase (Desktop) & Luxury Card (Mobile) -->
+<main class="w-full max-w-7xl mx-auto my-auto py-6 sm:py-10 relative z-10">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+    
+    <!-- LEFT COLUMN: Superadmin Core Showcase & Status Badges (6 Cols) -->
+    <div class="lg:col-span-6 space-y-6 hidden lg:block">
+      
+      <!-- Superadmin Header Badge -->
+      <div class="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-xs font-bold text-indigo-300 shadow-lg shadow-indigo-500/5">
+        <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+        <span>Axom AI Content Crawler &amp; Knowledge Ingestion</span>
+      </div>
+
+      <div class="space-y-3">
+        <h1 class="text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">
+          Crawl, Read &amp; Feed <br>
+          <span class="bg-gradient-to-r from-indigo-400 via-violet-300 to-purple-400 bg-clip-text text-transparent">
+            the Axom AI Knowledge Base
+          </span>
+        </h1>
+        <p class="text-sm text-slate-400 leading-relaxed max-w-lg">
+          Crawl websites, read uploaded PDFs and documents (including scanned pages), build the Q&amp;A and vector index, and import the result into Axom AI. Signed in with your Axom AI admin login.
+        </p>
+      </div>
+
+      <!-- 4 Showcase Dynamic Live Badges -->
+      <div class="grid grid-cols-2 gap-3.5 pt-2">
+        <div class="glass-feature-card rounded-2xl p-4 border border-slate-800/90 hover:border-indigo-500/30 transition duration-300 group">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/25 text-indigo-400 flex items-center justify-center text-sm mb-3 group-hover:scale-110 transition">
+            <i class="fa-solid fa-spider"></i>
+          </div>
+          <div class="text-xs font-bold text-white mb-0.5">Smart Site Crawler</div>
+          <div class="text-[11px] text-slate-400">Cleans pages, skips noise, keeps sources</div>
+        </div>
+
+        <div class="glass-feature-card rounded-2xl p-4 border border-slate-800/90 hover:border-purple-500/30 transition duration-300 group">
+          <div class="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/25 text-purple-400 flex items-center justify-center text-sm mb-3 group-hover:scale-110 transition">
+            <i class="fa-solid fa-file-lines"></i>
+          </div>
+          <div class="text-xs font-bold text-white mb-0.5">Document Reader</div>
+          <div class="text-[11px] text-slate-400">PDF, Word and scanned pages with OCR</div>
+        </div>
+
+        <div class="glass-feature-card rounded-2xl p-4 border border-slate-800/90 hover:border-emerald-500/30 transition duration-300 group">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 flex items-center justify-center text-sm mb-3 group-hover:scale-110 transition">
+            <i class="fa-solid fa-shield-halved"></i>
+          </div>
+          <div class="text-xs font-bold text-white mb-0.5">3-Strike / 24h Lockout</div>
+          <div class="text-[11px] text-slate-400">Brute-force & injection hardened</div>
+        </div>
+
+        <div class="glass-feature-card rounded-2xl p-4 border border-slate-800/90 hover:border-violet-500/30 transition duration-300 group">
+          <div class="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/25 text-violet-400 flex items-center justify-center text-sm mb-3 group-hover:scale-110 transition">
+            <i class="fa-solid fa-database"></i>
+          </div>
+          <div class="text-xs font-bold text-white mb-0.5">Q&amp;A &amp; Vector Index</div>
+          <div class="text-[11px] text-slate-400">Searchable chunks, imported into Axom AI</div>
+        </div>
+      </div>
+
+      <!-- Security Guard Details -->
+      <div class="rounded-2xl bg-slate-950/80 border border-slate-800/80 p-4 font-mono-code text-xs text-slate-300 space-y-1.5 shadow-xl">
+        <div class="flex items-center justify-between text-[11px] text-slate-500 pb-1 border-b border-slate-800/60">
+          <span class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block"></span>
+            <span class="text-slate-400 ml-1">crawler-bot-sentry</span>
+          </span>
+          <span class="text-emerald-400 flex items-center gap-1"><i class="fa-solid fa-shield-halved text-[10px]"></i> ACTIVE SHIELD</span>
+        </div>
+        <div class="text-slate-400 pt-1 flex items-center gap-2">
+          <span class="text-indigo-400">$</span>
+          <span>sentry verify --ip=@@CLIENT_IP@@</span>
+        </div>
+        <div class="text-emerald-300 text-[11px] flex items-center gap-1.5">
+          <i class="fa-solid fa-check text-emerald-400 text-[10px]"></i>
+          <span>Database rate-limiting, SQLi/XSS scrubbing & 24h lockout enabled</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: Ultra-Luxury Obsidian Login Box (6 Cols) -->
+    <div class="lg:col-span-6 flex justify-center">
+      <div class="w-full max-w-md">
+        
+        <!-- Luxury Card Container -->
+        <div class="glass-card-obsidian rounded-3xl p-6 sm:p-9 relative overflow-hidden">
+          
+          <!-- Top Laser Edge Accent -->
+          <div class="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-indigo-500 to-transparent"></div>
+          <div class="absolute -top-12 -right-12 w-36 h-36 bg-indigo-600/15 rounded-full blur-2xl pointer-events-none"></div>
+
+          <!-- Card Header with Brand Logo -->
+          <div class="text-center mb-6 sm:mb-7">
+            <div class="inline-flex p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-700/80 shadow-xl shadow-indigo-600/15 mb-3.5 items-center justify-center hover:scale-105 transition-transform duration-200">
+              <img src="https://aiaxom.co.in/axom-browser-logo.png" alt="Axom AI Official Logo" class="h-11 sm:h-12 w-auto object-contain drop-shadow">
+            </div>
+            <h2 class="text-2xl font-black text-white tracking-tight flex items-center justify-center gap-2">
+              <span>Crawler Bot Sign In</span>
+            </h2>
+            <p class="text-xs sm:text-sm text-slate-400 mt-1">
+              Use your Axom AI admin login
+            </p>
+            
+            @@PILL@@
+          </div>
+
+          @@ALERT@@
+
+          <!-- Caps Lock Alert -->
+          <div id="caps-lock-warning" class="hidden mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2 animate-in fade-in duration-150">
+            <i class="fa-solid fa-triangle-exclamation text-amber-400 shrink-0"></i>
+            <span><strong>Caps Lock is ON</strong> — Passwords are case sensitive.</span>
+          </div>
+
+          <!-- Login Form -->
+          <form method="POST" id="loginForm" class="space-y-4 sm:space-y-5" onsubmit="handleFormSubmit(event)">
+            <input type="hidden" name="csrf" value="@@CSRF@@">
+
+            <!-- Username Field -->
+            <div>
+              <label for="username" class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>Username</span>
+                <span class="text-[10px] text-slate-500 font-mono font-normal">Axom AI login</span>
+              </label>
+              <div class="relative group">
+                <div class="w-11 h-full absolute left-0 top-0 flex items-center justify-center text-slate-500 group-focus-within:text-indigo-400 transition-colors pointer-events-none">
+                  <i class="fa-solid fa-user-shield text-sm"></i>
+                </div>
+                <input 
+                  type="text" 
+                  name="username" 
+                  id="username"
+                  required 
+                  autofocus 
+                  autocomplete="username"
+                  autocapitalize="none"
+                  autocorrect="off"
+                  spellcheck="false"
+                  maxlength="150"
+                  @@DISABLED@@
+                  value="@@USERNAME@@"
+                  placeholder="Enter your username"
+                  class="w-full pl-11 pr-4 py-3.5 bg-[#0b1120] border border-slate-700/90 hover:border-slate-600 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+              </div>
+            </div>
+
+            <!-- Password Field -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label for="password" class="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Password
+                </label>
+                <span class="text-[10px] text-slate-500 font-mono">Encrypted</span>
+              </div>
+              <div class="relative group">
+                <div class="w-11 h-full absolute left-0 top-0 flex items-center justify-center text-slate-500 group-focus-within:text-indigo-400 transition-colors pointer-events-none">
+                  <i class="fa-solid fa-key text-sm"></i>
+                </div>
+                <input 
+                  type="password" 
+                  name="password" 
+                  id="password"
+                  required 
+                  autocomplete="current-password"
+                  autocapitalize="none"
+                  autocorrect="off"
+                  spellcheck="false"
+                  maxlength="256"
+                  @@DISABLED@@
+                  placeholder="••••••••••••"
+                  onkeyup="checkCapsLock(event)"
+                  onkeydown="checkCapsLock(event)"
+                  class="w-full pl-11 pr-12 py-3.5 bg-[#0b1120] border border-slate-700/90 hover:border-slate-600 rounded-2xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner font-mono font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                <button 
+                  type="button" 
+                  onclick="togglePasswordVisibility()" 
+                  aria-label="Toggle password visibility"
+                  tabindex="-1"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800/80 transition cursor-pointer">
+                  <i id="password-eye-icon" class="fa-solid fa-eye text-sm"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Remember Me Session Toggle -->
+            <div class="flex items-center justify-between text-xs pt-1">
+              <label class="inline-flex items-center gap-2.5 cursor-pointer select-none text-slate-300 hover:text-white transition">
+                <input type="checkbox" name="remember" checked class="w-4 h-4 rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-indigo-500/30 accent-indigo-600 cursor-pointer">
+                <span>Remember session on this device</span>
+              </label>
+              <span class="text-[10px] text-slate-500 font-mono">Secure Token</span>
+            </div>
+
+            <!-- Submit Button -->
+            <button 
+              type="submit"
+              id="submitBtn"
+              @@DISABLED@@
+              class="w-full py-4 px-5 bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 active:scale-[0.99] text-white font-bold rounded-2xl text-sm sm:text-base shadow-xl shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all duration-200 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2">
+              <span id="btnText" class="flex items-center gap-2">
+                @@BUTTON@@
+              </span>
+              <span id="btnSpinner" class="hidden flex items-center gap-2">
+                <i class="fa-solid fa-circle-notch fa-spin text-sm"></i>
+                <span>Verifying Credentials...</span>
+              </span>
+            </button>
+          </form>
+
+          <!-- Security Footer Strip -->
+          <div class="mt-6 pt-5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+            <div class="flex items-center gap-1.5 text-slate-400">
+              <i class="fa-solid fa-shield-halved text-emerald-400 text-xs"></i>
+              <span>Admin or Bot Permission Required</span>
+            </div>
+            <div class="font-mono text-[10px] text-slate-500">
+              TLS 1.3 &bull; IP Logged
+            </div>
+          </div>
+        </div>
+
+        <!-- Help Link Under Card -->
+        <div class="text-center mt-5 space-y-1.5">
+          <p class="text-xs text-slate-500">
+            Authorized Axom AI staff only &bull; Strict 3-strike brute-force defense
+          </p>
+          <div class="flex items-center justify-center gap-3 text-xs">
+            <a href="mailto:support@aiaxom.co.in?subject=Axom%20AI%20Crawler%20Bot%20Access%20Request" class="text-indigo-400 hover:text-indigo-300 font-medium transition inline-flex items-center gap-1.5 underline underline-offset-4">
+              <i class="fa-solid fa-envelope text-[10px]"></i> Contact System Administrator
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Bottom Footer -->
+<footer class="w-full max-w-7xl mx-auto pb-2 sm:pb-4 text-center z-10">
+  <div class="flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-500 pt-4 border-t border-slate-800/60">
+    <div>
+      Axom AI Platform &copy; 2026 &bull; Headquartered in Guwahati, Assam (India)
+    </div>
+    <div class="flex items-center gap-3 text-slate-500">
+      <span>Information Technology Act 2000 &bull; DPDP 2023 Aligned</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Password Visibility Toggle
+function togglePasswordVisibility() {
+  const pwd = document.getElementById('password');
+  const icon = document.getElementById('password-eye-icon');
+  if (!pwd || !icon) return;
+  if (pwd.type === 'password') {
+    pwd.type = 'text';
+    icon.classList.remove('fa-eye');
+    icon.classList.add('fa-eye-slash');
+    icon.classList.add('text-indigo-400');
+  } else {
+    pwd.type = 'password';
+    icon.classList.remove('fa-eye-slash');
+    icon.classList.remove('text-indigo-400');
+    icon.classList.add('fa-eye');
+  }
+}
+
+// Caps Lock Real-time Detector
+function checkCapsLock(e) {
+  const warning = document.getElementById('caps-lock-warning');
+  if (!warning) return;
+  if (e.getModifierState && e.getModifierState('CapsLock')) {
+    warning.classList.remove('hidden');
+  } else {
+    warning.classList.add('hidden');
+  }
+}
+
+// Form Submission Spinner Handling
+function handleFormSubmit(e) {
+  const submitBtn = document.getElementById('submitBtn');
+  const btnText = document.getElementById('btnText');
+  const btnSpinner = document.getElementById('btnSpinner');
+
+  if (submitBtn && btnText && btnSpinner) {
+    submitBtn.disabled = true;
+    btnText.classList.add('hidden');
+    btnSpinner.classList.remove('hidden');
+  }
+}
+
+// Reset on Escape key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const userField = document.getElementById('username');
+    const passField = document.getElementById('password');
+    if (userField && !userField.disabled) userField.value = '';
+    if (passField && !passField.disabled) passField.value = '';
+    if (userField && !userField.disabled) userField.focus();
+  }
+});
+</script>
+
+</body>
+</html>
