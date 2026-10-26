@@ -145,13 +145,14 @@ class CrawlerEngine:
             self.job.log(f"Error fetching {url}: {str(e)}")
             return None
 
-    async def fetch_dynamic(self, playwright, url: str) -> Optional[tuple[str, int]]:
+    async def fetch_dynamic(self, browser, url: str) -> Optional[tuple[str, int]]:
         """
         Renders dynamic JavaScript pages via Playwright headless Chromium.
+        Uses a shared browser instance, creating a fresh isolated context/page per URL.
         """
-        browser = None
+        context = None
+        page = None
         try:
-            browser = await playwright.chromium.launch(headless=True)
             context = await browser.new_context(user_agent=self.DEFAULT_USER_AGENT)
             page = await context.new_page()
             response = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
@@ -159,13 +160,21 @@ class CrawlerEngine:
             await asyncio.sleep(1.0)
             content = await page.content()
             status_code = response.status if response else 200
-            await browser.close()
             return content, status_code
         except Exception as e:
             self.job.log(f"Playwright error on {url}: {str(e)}")
-            if browser:
-                await browser.close()
             return None
+        finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+            if context:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
     async def _api_source_pages(self, client: httpx.AsyncClient) -> List[Dict[str, Any]]:
         """AXOMAI-API: clean article text from the site's own API (WordPress) instead of crawling its pages. [] = crawl normally.
@@ -227,11 +236,16 @@ class CrawlerEngine:
         }
 
         playwright_instance = None
+        playwright_browser = None
         if self.job.render_js:
             try:
                 from playwright.async_api import async_playwright
                 playwright_context = async_playwright()
                 playwright_instance = await playwright_context.__aenter__()
+                playwright_browser = await playwright_instance.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                )
             except Exception as e:
                 self.job.log(f"Playwright initialization failed, falling back to static: {e}")
                 self.job.render_js = False
@@ -241,6 +255,12 @@ class CrawlerEngine:
                 api_pages = await self._api_source_pages(client)
                 if api_pages:
                     self._ingest_api_pages(api_pages)
+                else:
+                    # REA Enhancement: Probe automated XML sitemaps before spidering
+                    sitemap_count = await self.frontier.discover_sitemap(client, self.job.log)
+                    if sitemap_count > 0:
+                        self.job.log(f"🗺️ Seeded queue with {sitemap_count} URLs from XML sitemap(s)")
+
                 while not api_pages and self.frontier.has_more():
                     if self.job.is_cancelled:
                         self.job.log(f"🛑 [Crawl Stopped]: Stopped by user request. Saving {self.job.pages_crawled} crawled pages.")
@@ -256,8 +276,8 @@ class CrawlerEngine:
 
                     # Fetch page content
                     fetch_result = None
-                    if self.job.render_js and playwright_instance:
-                        fetch_result = await self.fetch_dynamic(playwright_instance, current_url)
+                    if self.job.render_js and playwright_browser:
+                        fetch_result = await self.fetch_dynamic(playwright_browser, current_url)
                     else:
                         fetch_result = await self.fetch_static(client, current_url)
 
@@ -347,8 +367,16 @@ class CrawlerEngine:
             self.job.log(err_msg)
 
         finally:
+            if playwright_browser:
+                try:
+                    await playwright_browser.close()
+                except Exception:
+                    pass
             if playwright_instance:
-                await playwright_context.__aexit__(None, None, None)
+                try:
+                    await playwright_context.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
             # Persist to UTF-8 JSON file
             try:

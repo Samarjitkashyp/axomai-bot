@@ -1,11 +1,24 @@
-.env
+# Python environment
 venv/
+.venv/
+env/
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
-*.log
-*.bak*
+
+# Environment variables & secrets
+.env
+*.pem
+*.key
+
+# Crawler cache & datasets
 crawled_data/
 crawled_data_raw/
-vector_store/
-reports/
 uploads/
+vector_store/
+simplescraper_source/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

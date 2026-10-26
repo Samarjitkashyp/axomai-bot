@@ -40,6 +40,7 @@ from app.models import (
     RAGChatResponse
 )
 from crawler.engine import CrawlerJob, CrawlerEngine
+from crawler.frontier import URLFrontier
 from app.export import export_pages
 from crawler.storage import StorageManager
 from rag.vector_store import VectorStoreManager
@@ -81,7 +82,7 @@ def _admin_only(request: Request):
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith("/static") or path.startswith("/docs") or path.startswith("/openapi") or path in PUBLIC_PATHS:
+        if path.startswith("/static") or path.startswith("/docs") or path.startswith("/openapi") or path in PUBLIC_PATHS or path.startswith("/api/mcp"):
             return await call_next(request)
         request.state.via_admin_panel = False
         if path.startswith("/api/upload"):
@@ -973,4 +974,328 @@ async def toggle_schedule(request: Request):
 async def delete_schedule(seed_url: str):
     remove_schedule(seed_url)
     return {"message": "Schedule removed", "seed_url": seed_url}
+
+
+# --- Model Context Protocol (MCP) Server Endpoints ---
+# REA Enhancement: JSON-RPC 2.0 MCP interface compatible with Cursor, Claude Desktop, and AI subagents
+
+@app.get("/api/mcp")
+async def mcp_server_info():
+    """
+    Model Context Protocol (MCP) Server Discovery & Health.
+    Provides server capabilities, tool specifications, and integration instructions.
+    """
+    return {
+        "name": "axomai-bot-mcp",
+        "version": "1.0.0",
+        "description": "Axom AI Intelligent Crawler & Semantic RAG MCP Server",
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+            "tools": {
+                "crawl_website": {
+                    "description": "Trigger an automated web crawl on any website with UTF-8 multilingual extraction (Assamese, Hindi, English).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "Target website seed URL (e.g. https://example.com)"},
+                            "max_pages": {"type": "integer", "default": 10, "description": "Maximum pages to crawl"},
+                            "max_depth": {"type": "integer", "default": 2, "description": "Maximum link depth"},
+                            "render_js": {"type": "boolean", "default": False, "description": "Whether to render dynamic JavaScript via Playwright"}
+                        },
+                        "required": ["url"]
+                    }
+                },
+                "get_crawl_status": {
+                    "description": "Fetch real-time crawling status, progress, logs, and pages for a job ID.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "job_id": {"type": "string", "description": "The job ID returned by crawl_website"}
+                        },
+                        "required": ["job_id"]
+                    }
+                },
+                "search_knowledge_base": {
+                    "description": "Perform semantic vector search across all indexed web content in ChromaDB.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query or natural language question"},
+                            "top_k": {"type": "integer", "default": 5, "description": "Number of top matching chunks to return"}
+                        },
+                        "required": ["query"]
+                    }
+                },
+                "discover_sitemap": {
+                    "description": "Probes and extracts page URLs from the website's XML sitemaps (/sitemap.xml, /wp-sitemap.xml).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "Target website URL"}
+                        },
+                        "required": ["url"]
+                    }
+                }
+            }
+        },
+        "endpoints": {
+            "mcp_rpc": "/api/mcp",
+            "documentation": "/docs"
+        }
+    }
+
+
+@app.post("/api/mcp")
+async def mcp_rpc_handler(request: Request, background_tasks: BackgroundTasks):
+    """
+    Model Context Protocol (MCP) JSON-RPC 2.0 Handler.
+    Compatible with Claude Desktop, Cursor, and any MCP Client.
+    """
+    token = os.getenv("BOT_IMPORT_TOKEN", "").strip()
+    if token:
+        auth_header = request.headers.get("Authorization", "")
+        bot_token_header = request.headers.get("X-Bot-Token", "")
+        bearer_token = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+        user = get_current_user(request)
+        is_authenticated = bool(user) or (
+            secrets.compare_digest(bot_token_header, token) if bot_token_header else False
+        ) or (
+            secrets.compare_digest(bearer_token, token) if bearer_token else False
+        )
+        if not is_authenticated:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32000, "message": "Unauthorized. Provide valid X-Bot-Token or Authorization Bearer header."},
+                    "id": None
+                }
+            )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error. Invalid JSON was received."}, "id": None}
+        )
+
+    req_id = body.get("id")
+    method = body.get("method")
+    params = body.get("params", {})
+
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "axomai-bot-mcp",
+                    "version": "1.0.0"
+                }
+            }
+        }
+
+    elif method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "crawl_website",
+                        "description": "Trigger an automated web crawl on any website with UTF-8 multilingual extraction (Assamese, Hindi, English).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "description": "Target website seed URL (e.g. https://example.com)"},
+                                "max_pages": {"type": "integer", "default": 10, "description": "Maximum pages to crawl"},
+                                "max_depth": {"type": "integer", "default": 2, "description": "Maximum link depth"},
+                                "render_js": {"type": "boolean", "default": False, "description": "Whether to render dynamic JavaScript via Playwright"}
+                            },
+                            "required": ["url"]
+                        }
+                    },
+                    {
+                        "name": "get_crawl_status",
+                        "description": "Fetch real-time crawling status, progress, logs, and pages for a job ID.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "job_id": {"type": "string", "description": "The job ID returned by crawl_website"}
+                            },
+                            "required": ["job_id"]
+                        }
+                    },
+                    {
+                        "name": "search_knowledge_base",
+                        "description": "Perform semantic vector search across all indexed web content in ChromaDB.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "Search query or natural language question"},
+                                "top_k": {"type": "integer", "default": 5, "description": "Number of top matching chunks to return"}
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "discover_sitemap",
+                        "description": "Probes and extracts page URLs from the website's XML sitemaps (/sitemap.xml, /wp-sitemap.xml).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "description": "Target website URL"}
+                            },
+                            "required": ["url"]
+                        }
+                    }
+                ]
+            }
+        }
+
+    elif method == "tools/call":
+        tool_name = params.get("name")
+        arguments = params.get("arguments", {})
+
+        if tool_name == "crawl_website":
+            url = arguments.get("url", "").strip()
+            if not url:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32602, "message": "Missing required argument 'url'"}
+                }
+            max_pages = int(arguments.get("max_pages", 10))
+            max_depth = int(arguments.get("max_depth", 2))
+            render_js = bool(arguments.get("render_js", False))
+
+            job_id = f"job_{uuid.uuid4().hex[:8]}"
+            job = CrawlerJob(
+                job_id=job_id,
+                seed_url=url,
+                max_pages=max_pages,
+                max_depth=max_depth,
+                crawl_delay=0.5,
+                render_js=render_js,
+                force_recrawl=False,
+                include_subdomains=False
+            )
+            active_jobs[job_id] = job
+            engine = CrawlerEngine(job=job, storage_manager=storage_manager)
+
+            async def _crawl_and_register():
+                await engine.run()
+                if job.status == "completed":
+                    register_crawl(url)
+                    await _push_to_chat(job_id, url)
+
+            background_tasks.add_task(_crawl_and_register)
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully initiated crawl for {url}.\nJob ID: {job_id}\nStatus: queued\nTrack progress with get_crawl_status(job_id='{job_id}')"
+                        }
+                    ]
+                }
+            }
+
+        elif tool_name == "get_crawl_status":
+            job_id = arguments.get("job_id", "").strip()
+            if not job_id:
+                return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Missing 'job_id'"}}
+
+            if job_id in active_jobs:
+                data = active_jobs[job_id].to_dict()
+            else:
+                data = storage_manager.get_crawl_job(job_id)
+
+            if not data:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": f"Job ID '{job_id}' not found."}]}
+                }
+
+            status = data.get("status", "unknown")
+            pages_crawled = data.get("pages_crawled", len(data.get("pages", [])))
+            seed_url = data.get("seed_url", "")
+            summary = f"Crawl Status for {job_id} ({seed_url}):\nStatus: {status}\nPages Crawled: {pages_crawled}"
+            pages = data.get("pages", []) or data.get("latest_pages", [])
+            if pages:
+                summary += "\nSample Pages:\n" + "\n".join([f"- {p.get('title', 'Untitled')} ({p.get('url', '')})" for p in pages[:5]])
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": summary}]}
+            }
+
+        elif tool_name == "search_knowledge_base":
+            query = arguments.get("query", "").strip()
+            top_k = int(arguments.get("top_k", 5))
+            if not query:
+                return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Missing 'query'"}}
+
+            matches = vector_store.query(query, n_results=top_k)
+            if not matches:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": f"No indexed content found matching '{query}'."}]}
+                }
+
+            result_lines = [f"Found {len(matches)} relevant passage(s) for '{query}':\n"]
+            for i, m in enumerate(matches, 1):
+                result_lines.append(f"[{i}] {m.get('metadata', {}).get('title', 'Source')} ({m.get('metadata', {}).get('url', '')})")
+                result_lines.append(f"Passage: {m.get('text', '')[:300]}...\n")
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": "\n".join(result_lines)}]}
+            }
+
+        elif tool_name == "discover_sitemap":
+            url = arguments.get("url", "").strip()
+            if not url:
+                return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Missing 'url'"}}
+
+            frontier = URLFrontier(seed_url=url, max_pages=100)
+            async with httpx.AsyncClient(headers={"User-Agent": CrawlerEngine.DEFAULT_USER_AGENT}, verify=False) as client:
+                count = await frontier.discover_sitemap(client)
+
+            urls = [item[0] for item in list(frontier.queue)[:10]]
+            res_text = f"Discovered {count} URLs from sitemap for {url}."
+            if urls:
+                res_text += "\nFirst 10 sample URLs:\n" + "\n".join(f"- {u}" for u in urls)
+
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": res_text}]}
+            }
+
+        else:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"Method or tool '{tool_name}' not found."}
+            }
+
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": f"Unknown JSON-RPC method '{method}'"}
+    }
+
 

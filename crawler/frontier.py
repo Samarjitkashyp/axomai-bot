@@ -184,3 +184,60 @@ class URLFrontier:
         Returns True if there are more URLs to visit and max_pages is not reached.
         """
         return bool(self.queue) and (self.pages_crawled < self.max_pages)
+
+    async def discover_sitemap(self, client, log_fn=None) -> int:
+        """
+        AXOMAI-REA: Automated sitemap discovery inspired by modern scraping engines.
+        Checks /sitemap.xml, /sitemap_index.xml, /wp-sitemap.xml.
+        Directly queues all target page URLs into the frontier queue.
+        """
+        base = f"{self.scheme}://{self.base_domain}"
+        candidate_paths = [
+            "/sitemap.xml",
+            "/sitemap_index.xml",
+            "/wp-sitemap.xml",
+            "/sitemap/sitemap.xml"
+        ]
+
+        found_urls = set()
+        visited_sitemaps = set()
+
+        async def _fetch_sitemap(url: str, depth: int = 0):
+            if depth > 2 or url in visited_sitemaps or len(found_urls) >= self.max_pages * 2:
+                return
+            visited_sitemaps.add(url)
+            try:
+                resp = await client.get(url, follow_redirects=True, timeout=10.0)
+                if resp.status_code != 200:
+                    return
+                text = resp.text
+                if "<sitemapindex" in text.lower():
+                    # Parse sub-sitemaps
+                    sub_sitemaps = re.findall(r"<loc>\s*(https?://[^<\s]+)\s*</loc>", text, re.IGNORECASE)
+                    for sub in sub_sitemaps[:5]:
+                        await _fetch_sitemap(sub.strip(), depth + 1)
+                elif "<urlset" in text.lower() or "<url>" in text.lower():
+                    locs = re.findall(r"<loc>\s*(https?://[^<\s]+)\s*</loc>", text, re.IGNORECASE)
+                    for loc in locs:
+                        found_urls.add(loc.strip())
+            except Exception:
+                pass
+
+        for path in candidate_paths:
+            s_url = f"{base}{path}"
+            await _fetch_sitemap(s_url, 0)
+            if found_urls:
+                break
+
+        added_count = 0
+        for u in found_urls:
+            if self.add_url(u, depth=1):
+                added_count += 1
+                if self.pages_crawled + len(self.queue) >= self.max_pages * 2:
+                    break
+
+        if added_count > 0 and log_fn:
+            log_fn(f"🗺️ [Sitemap Discovery]: Found and enqueued {added_count} URLs from sitemap.xml")
+
+        return added_count
+
