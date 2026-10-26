@@ -1,6 +1,12 @@
 let currentJobId = null;
 let pollInterval = null;
 
+// Pagination & Filtering state for Crawled Datasets
+let allJobs = [];
+let currentJobsPage = 1;
+const JOBS_PAGE_SIZE = 10;
+let jobsSearchQuery = '';
+
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
 });
@@ -16,12 +22,39 @@ function initApp() {
     const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
     const stopCrawlBtn = document.getElementById('stopCrawlBtn');
     const resetVectorBtn = document.getElementById('resetVectorBtn');
+    const jobsSearchInput = document.getElementById('jobsSearchInput');
+    const clearJobsSearchBtn = document.getElementById('clearJobsSearchBtn');
 
     crawlForm.addEventListener('submit', handleStartCrawl);
-    refreshJobsBtn.addEventListener('click', loadJobs);
+    refreshJobsBtn.addEventListener('click', () => loadJobs());
     clearLogsBtn.addEventListener('click', () => {
         document.getElementById('logTerminal').innerHTML = '<p class="log-placeholder">Logs cleared.</p>';
     });
+
+    if (jobsSearchInput) {
+        jobsSearchInput.addEventListener('input', (e) => {
+            jobsSearchQuery = e.target.value.trim().toLowerCase();
+            currentJobsPage = 1; // Reset to page 1 on new search
+            if (clearJobsSearchBtn) {
+                if (jobsSearchQuery.length > 0) {
+                    clearJobsSearchBtn.classList.remove('hidden');
+                } else {
+                    clearJobsSearchBtn.classList.add('hidden');
+                }
+            }
+            renderJobsTable();
+        });
+    }
+
+    if (clearJobsSearchBtn) {
+        clearJobsSearchBtn.addEventListener('click', () => {
+            if (jobsSearchInput) jobsSearchInput.value = '';
+            jobsSearchQuery = '';
+            clearJobsSearchBtn.classList.add('hidden');
+            currentJobsPage = 1;
+            renderJobsTable();
+        });
+    }
 
     if (stopCrawlBtn) {
         stopCrawlBtn.addEventListener('click', stopActiveCrawl);
@@ -252,59 +285,188 @@ async function loadJobs() {
         if (!res.ok) return;
 
         const data = await res.json();
-        const jobs = data.jobs || [];
+        allJobs = data.jobs || [];
 
-        // Update metric counters
-        document.getElementById('statTotalJobs').textContent = jobs.length;
-        const totalPages = jobs.reduce((sum, j) => sum + (j.total_pages || 0), 0);
-        document.getElementById('statTotalPages').textContent = totalPages;
-        const activeCount = jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
-        document.getElementById('statActiveJobs').textContent = activeCount;
+        // Update metric counters from full dataset
+        const totalJobsEl = document.getElementById('statTotalJobs');
+        if (totalJobsEl) totalJobsEl.textContent = allJobs.length;
 
-        const tbody = document.getElementById('jobsTableBody');
-        if (jobs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No crawled datasets found yet. Start your first crawl above!</td></tr>';
-            return;
-        }
+        const totalPages = allJobs.reduce((sum, j) => sum + (j.total_pages || 0), 0);
+        const totalPagesEl = document.getElementById('statTotalPages');
+        if (totalPagesEl) totalPagesEl.textContent = totalPages;
 
-        tbody.innerHTML = jobs.map(job => {
-            const domain = extractDomain(job.seed_url || '');
-            const badgeClass = job.status === 'completed' ? 'badge-completed' : (job.status === 'running' ? 'badge-running' : 'badge-failed');
-            const sizeKb = job.file_size_bytes ? (job.file_size_bytes / 1024).toFixed(1) + ' KB' : '—';
-            const dateStr = job.completed_at ? new Date(job.completed_at).toLocaleString() : 'In Progress';
+        const activeCount = allJobs.filter(j => j.status === 'running' || j.status === 'queued').length;
+        const activeJobsEl = document.getElementById('statActiveJobs');
+        if (activeJobsEl) activeJobsEl.textContent = activeCount;
 
-            return `
-                <tr>
-                    <td><strong>${job.job_id}</strong></td>
-                    <td title="${job.seed_url}">${domain}</td>
-                    <td><span class="badge ${badgeClass}">${job.status}</span></td>
-                    <td>
-                        <strong>${job.total_pages || 0}</strong>
-                        <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">
-                            <span style="color:#34d399;">+${job.pages_new ?? job.total_pages ?? 0}</span>
-                            ${job.pages_skipped ? `<span style="color:#94a3b8;"> | ⏩ ${job.pages_skipped}</span>` : ''}
-                            ${job.pages_updated ? `<span style="color:#fbbf24;"> | 🔄 ${job.pages_updated}</span>` : ''}
-                        </div>
-                    </td>
-                    <td>${dateStr}</td>
-                    <td>${sizeKb}</td>
-                    <td>
-                        <div class="table-actions">
-                            <button class="btn btn-emerald btn-xs" onclick="indexDataset('${job.job_id}')" title="Chunk and store into Vector DB">⚡ Index</button>
-                            <button class="btn btn-secondary btn-xs" onclick="inspectDataset('${job.job_id}')">👁 View</button>
-                            <a href="/api/crawl/export/${job.job_id}/json" class="btn btn-primary btn-xs" target="_blank" title="Download JSON (page name + content only)">⬇ JSON</a>
-                            <a href="/api/crawl/export/${job.job_id}/csv" class="btn-csv" target="_blank" title="Download Excel CSV (page name + content only)">📊 CSV</a>
-                            <a href="/api/crawl/export/${job.job_id}/pdf" class="btn-pdf" target="_blank" title="Download PDF (page name + content only)">📑 PDF</a>
-                            <button class="btn-delete" onclick="deleteDataset('${job.job_id}')" title="Delete Dataset & Vectors">🗑️</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-
+        renderJobsTable();
     } catch (err) {
         console.error('Failed to load jobs:', err);
     }
+}
+
+function renderJobsTable() {
+    const tbody = document.getElementById('jobsTableBody');
+    const paginationInfo = document.getElementById('jobsPaginationInfo');
+    const paginationControls = document.getElementById('jobsPaginationControls');
+    const paginationBar = document.getElementById('jobsPagination');
+    if (!tbody) return;
+
+    // Filter jobs based on search query
+    let filtered = allJobs;
+    if (jobsSearchQuery) {
+        filtered = allJobs.filter(job => {
+            const jId = (job.job_id || '').toLowerCase();
+            const seed = (job.seed_url || '').toLowerCase();
+            const dom = extractDomain(job.seed_url || '').toLowerCase();
+            return jId.includes(jobsSearchQuery) || seed.includes(jobsSearchQuery) || dom.includes(jobsSearchQuery);
+        });
+    }
+
+    if (filtered.length === 0) {
+        if (jobsSearchQuery) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No datasets found matching "<strong>${escapeHtml(jobsSearchQuery)}</strong>". Try a different search term.</td></tr>`;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No crawled datasets found yet. Start your first crawl above!</td></tr>';
+        }
+        if (paginationInfo) paginationInfo.textContent = 'Showing 0 of 0 datasets';
+        if (paginationControls) paginationControls.innerHTML = '';
+        if (paginationBar) paginationBar.classList.add('hidden');
+        return;
+    }
+
+    if (paginationBar) paginationBar.classList.remove('hidden');
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / JOBS_PAGE_SIZE));
+    if (currentJobsPage > totalPages) currentJobsPage = totalPages;
+    if (currentJobsPage < 1) currentJobsPage = 1;
+
+    const startIdx = (currentJobsPage - 1) * JOBS_PAGE_SIZE;
+    const endIdx = Math.min(startIdx + JOBS_PAGE_SIZE, filtered.length);
+    const pagedJobs = filtered.slice(startIdx, endIdx);
+
+    // Render table rows (latest 10 per page)
+    tbody.innerHTML = pagedJobs.map(job => {
+        const domain = extractDomain(job.seed_url || '');
+        const badgeClass = job.status === 'completed' ? 'badge-completed' : (job.status === 'running' ? 'badge-running' : 'badge-failed');
+        const sizeKb = job.file_size_bytes ? (job.file_size_bytes / 1024).toFixed(1) + ' KB' : '—';
+        const dateStr = job.completed_at ? new Date(job.completed_at).toLocaleString() : 'In Progress';
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(job.job_id)}</strong></td>
+                <td title="${escapeHtml(job.seed_url)}">${escapeHtml(domain)}</td>
+                <td><span class="badge ${badgeClass}">${escapeHtml(job.status)}</span></td>
+                <td>
+                    <strong>${job.total_pages || 0}</strong>
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">
+                        <span style="color:#059669; font-weight:600;">+${job.pages_new ?? job.total_pages ?? 0}</span>
+                        ${job.pages_skipped ? `<span style="color:#64748b;"> | ⏩ ${job.pages_skipped}</span>` : ''}
+                        ${job.pages_updated ? `<span style="color:#d97706;"> | 🔄 ${job.pages_updated}</span>` : ''}
+                    </div>
+                </td>
+                <td>${dateStr}</td>
+                <td>${sizeKb}</td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn btn-emerald btn-xs" onclick="indexDataset('${escapeHtml(job.job_id)}')" title="Chunk and store into Vector DB">⚡ Index</button>
+                        <button class="btn btn-secondary btn-xs" onclick="inspectDataset('${escapeHtml(job.job_id)}')">👁 View</button>
+                        <a href="/api/crawl/export/${job.job_id}/json" class="btn btn-primary btn-xs" target="_blank" title="Download JSON (page name + content only)">⬇ JSON</a>
+                        <a href="/api/crawl/export/${job.job_id}/csv" class="btn-csv" target="_blank" title="Download Excel CSV (page name + content only)">📊 CSV</a>
+                        <a href="/api/crawl/export/${job.job_id}/pdf" class="btn-pdf" target="_blank" title="Download PDF (page name + content only)">📑 PDF</a>
+                        <button class="btn-delete" onclick="deleteDataset('${escapeHtml(job.job_id)}')" title="Delete Dataset & Vectors">🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Update pagination info text
+    if (paginationInfo) {
+        paginationInfo.innerHTML = `Showing <strong>${startIdx + 1}–${endIdx}</strong> of <strong>${filtered.length}</strong> datasets${jobsSearchQuery ? ' (filtered)' : ''}`;
+    }
+
+    // Render pagination controls (Step-by-step buttons)
+    renderPaginationControls(totalPages, filtered.length);
+}
+
+function renderPaginationControls(totalPages, totalItems) {
+    const controls = document.getElementById('jobsPaginationControls');
+    if (!controls) return;
+
+    if (totalPages <= 1) {
+        controls.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+
+    // Prev Button
+    const prevDisabled = currentJobsPage <= 1 ? 'disabled' : '';
+    html += `<button class="page-btn page-nav" ${prevDisabled} onclick="goToJobsPage(${currentJobsPage - 1})" title="Previous Page">← Prev</button>`;
+
+    // Page number buttons with smart windowing
+    const pages = getPaginationPageNumbers(currentJobsPage, totalPages);
+    pages.forEach(p => {
+        if (p === '...') {
+            html += `<span class="page-ellipsis">…</span>`;
+        } else {
+            const activeClass = p === currentJobsPage ? 'active' : '';
+            html += `<button class="page-btn ${activeClass}" onclick="goToJobsPage(${p})">${p}</button>`;
+        }
+    });
+
+    // Next Button
+    const nextDisabled = currentJobsPage >= totalPages ? 'disabled' : '';
+    html += `<button class="page-btn page-nav" ${nextDisabled} onclick="goToJobsPage(${currentJobsPage + 1})" title="Next Page">Next →</button>`;
+
+    controls.innerHTML = html;
+}
+
+function getPaginationPageNumbers(current, total) {
+    if (total <= 7) {
+        const pages = [];
+        for (let i = 1; i <= total; i++) pages.push(i);
+        return pages;
+    }
+
+    const pages = [1];
+    if (current > 3) {
+        pages.push('...');
+    }
+
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+
+    for (let i = start; i <= end; i++) {
+        if (!pages.includes(i)) pages.push(i);
+    }
+
+    if (current < total - 2) {
+        pages.push('...');
+    }
+
+    if (!pages.includes(total)) {
+        pages.push(total);
+    }
+
+    return pages;
+}
+
+function goToJobsPage(pageNum) {
+    currentJobsPage = pageNum;
+    renderJobsTable();
+}
+window.goToJobsPage = goToJobsPage;
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 function extractDomain(url) {
